@@ -1,0 +1,176 @@
+import type { ArenaInput } from '../core/arena';
+
+export interface Bindings {
+  left: string[];
+  right: string[];
+  action: string[];
+  super: string[];
+  picks: [string[], string[], string[]];
+  /** Solo/campaign only: the mouse steers the paddle. */
+  mouse?: boolean;
+}
+
+export const SOLO_KEYS: Bindings = {
+  left: ['ArrowLeft', 'KeyA'],
+  right: ['ArrowRight', 'KeyD'],
+  action: ['Space', 'KeyW', 'ArrowUp'],
+  super: ['ShiftLeft', 'ShiftRight', 'KeyE'],
+  picks: [['Digit1', 'Numpad1'], ['Digit2', 'Numpad2'], ['Digit3', 'Numpad3']],
+  mouse: true,
+};
+
+export const P1_KEYS: Bindings = {
+  left: ['KeyA'],
+  right: ['KeyD'],
+  action: ['KeyW'],
+  super: ['KeyS', 'KeyQ'],
+  picks: [['Digit1'], ['Digit2'], ['Digit3']],
+};
+
+export const P2_KEYS: Bindings = {
+  left: ['ArrowLeft'],
+  right: ['ArrowRight'],
+  action: ['ArrowUp'],
+  super: ['ArrowDown', 'Slash'],
+  picks: [
+    ['Digit8', 'Numpad1'],
+    ['Digit9', 'Numpad2'],
+    ['Digit0', 'Numpad3'],
+  ],
+};
+
+/** Physical-key code for an event. Some environments (remote input, a few
+ *  virtual keyboards) send an empty `code`, so fall back to deriving one from
+ *  `key` — layout-independent bindings still work everywhere else. */
+function codeOf(e: KeyboardEvent): string {
+  if (e.code) return e.code;
+  const k = e.key;
+  if (k === ' ' || k === 'Spacebar') return 'Space';
+  if (k.length === 1) {
+    if (/[a-zA-Z]/.test(k)) return `Key${k.toUpperCase()}`;
+    if (/[0-9]/.test(k)) return `Digit${k}`;
+    if (k === '/') return 'Slash';
+  }
+  if (k === 'Shift') return 'ShiftLeft';
+  return k; // Escape, ArrowLeft, ... already match their code
+}
+
+/** Central keyboard/mouse state. Edge-triggered presses are consumed once per
+ *  simulation frame so a tap can never be read twice. */
+export class InputHub {
+  private down = new Set<string>();
+  private pressedNow = new Set<string>();
+  /** Pointer position in canvas CSS pixels; null until the mouse moves. */
+  pointer: { x: number; y: number } | null = null;
+  pointerDown = false;
+  clicked = false;
+
+  constructor(private target: HTMLCanvasElement) {
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onBlur);
+    target.addEventListener('mousemove', this.onMouseMove);
+    target.addEventListener('mousedown', this.onMouseDown);
+    window.addEventListener('mouseup', this.onMouseUp);
+    target.addEventListener('touchstart', this.onTouch, { passive: false });
+    target.addEventListener('touchmove', this.onTouch, { passive: false });
+    target.addEventListener('touchend', this.onTouchEnd);
+  }
+
+  dispose(): void {
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onBlur);
+    this.target.removeEventListener('mousemove', this.onMouseMove);
+    this.target.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    this.target.removeEventListener('touchstart', this.onTouch);
+    this.target.removeEventListener('touchmove', this.onTouch);
+    this.target.removeEventListener('touchend', this.onTouchEnd);
+  }
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (e.repeat) return;
+    const code = codeOf(e);
+    // Arrows/space scroll the page otherwise.
+    if (code.startsWith('Arrow') || code === 'Space') e.preventDefault();
+    this.down.add(code);
+    this.pressedNow.add(code);
+  };
+
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.down.delete(codeOf(e));
+  };
+
+  private onBlur = (): void => {
+    this.down.clear();
+  };
+
+  private setPointer(clientX: number, clientY: number): void {
+    const r = this.target.getBoundingClientRect();
+    this.pointer = { x: clientX - r.left, y: clientY - r.top };
+  }
+
+  private onMouseMove = (e: MouseEvent): void => this.setPointer(e.clientX, e.clientY);
+
+  private onMouseDown = (e: MouseEvent): void => {
+    this.setPointer(e.clientX, e.clientY);
+    this.pointerDown = true;
+    this.clicked = true;
+  };
+
+  private onMouseUp = (): void => {
+    this.pointerDown = false;
+  };
+
+  private onTouch = (e: TouchEvent): void => {
+    e.preventDefault();
+    const t = e.touches[0];
+    if (!t) return;
+    this.setPointer(t.clientX, t.clientY);
+    if (e.type === 'touchstart') {
+      this.pointerDown = true;
+      this.clicked = true;
+    }
+  };
+
+  private onTouchEnd = (): void => {
+    this.pointerDown = false;
+  };
+
+  isDown(codes: string[]): boolean {
+    return codes.some((c) => this.down.has(c));
+  }
+
+  wasPressed(codes: string[]): boolean {
+    return codes.some((c) => this.pressedNow.has(c));
+  }
+
+  anyPressed(): boolean {
+    return this.pressedNow.size > 0;
+  }
+
+  /** Call once per rendered frame, after the simulation has read its input. */
+  endFrame(): void {
+    this.pressedNow.clear();
+    this.clicked = false;
+  }
+
+  /** Builds arena input. `pointerArenaX` is the mouse mapped into arena units by
+   *  the caller (it knows the viewport layout), or null to ignore the mouse. */
+  read(b: Bindings, pointerArenaX: number | null): ArenaInput {
+    let pick: 0 | 1 | 2 | 3 = 0;
+    if (this.wasPressed(b.picks[0])) pick = 1;
+    else if (this.wasPressed(b.picks[1])) pick = 2;
+    else if (this.wasPressed(b.picks[2])) pick = 3;
+
+    return {
+      left: this.isDown(b.left),
+      right: this.isDown(b.right),
+      pointer: b.mouse ? pointerArenaX : null,
+      actionPressed: this.wasPressed(b.action) || (b.mouse === true && this.clicked),
+      superPressed: this.wasPressed(b.super),
+      pick,
+    };
+  }
+}
