@@ -82,7 +82,14 @@ export class ArenaFx {
     }
   }
 
+  /** Chain reactions on dense levels can spawn thousands of particles; the cap
+   *  keeps a spectacular explosion from turning into a stutter. */
+  private static readonly MAX_PARTICLES = 900;
+
   burst(x: number, y: number, color: string, count: number, speed = 170): void {
+    const room = ArenaFx.MAX_PARTICLES - this.parts.length;
+    if (room <= 0) return;
+    count = Math.min(count, room);
     for (let i = 0; i < count; i++) {
       const a = this.rng.range(0, Math.PI * 2);
       const s = this.rng.range(speed * 0.25, speed);

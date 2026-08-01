@@ -221,10 +221,11 @@ export const getPerk = (id: string): Perk | undefined => PERK_BY_ID.get(id);
 
 /** Global XP throttle. Levelling inside a run is deliberately slow: perks are a
  *  reward for a long clean streak, not something you collect every screen. */
-export const XP_RATE = 0.1;
+export const XP_RATE = 0.05;
 
-/** XP needed to go from `level` to `level + 1` inside a run. */
-export const xpForLevel = (level: number): number => Math.round(85 * Math.pow(level, 1.3));
+/** XP needed to go from `level` to `level + 1` inside a run. The curve is steep
+ *  on purpose — later perks should cost several levels of the campaign. */
+export const xpForLevel = (level: number): number => Math.round(110 * Math.pow(level, 1.5));
 
 /** Draft of three perks, respecting stack limits. Uses the arena's seeded RNG so
  *  a replayed run offers the same choices. */

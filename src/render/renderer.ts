@@ -149,13 +149,16 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
     const h = BRICK_H - 3;
 
     ctx.save();
-    ctx.shadowColor = b.kind.color;
-    ctx.shadowBlur = 10;
+    // Faked glow: a translucent oversized plate. A real shadowBlur here costs
+    // milliseconds once a level carries 150 bricks.
+    ctx.fillStyle = withAlpha(b.kind.color, 0.1 * damaged);
+    ctx.beginPath();
+    ctx.roundRect(x - 2, y - 2, w + 4, h + 4, 5);
+    ctx.fill();
     ctx.fillStyle = withAlpha(b.kind.color, 0.18 + 0.35 * damaged);
     ctx.beginPath();
     ctx.roundRect(x, y, w, h, 3);
     ctx.fill();
-    ctx.shadowBlur = 0;
     ctx.strokeStyle = withAlpha(b.kind.color, 0.55 + 0.45 * damaged);
     ctx.lineWidth = 1.4;
     ctx.stroke();
@@ -448,6 +451,8 @@ export interface HudOptions {
   compact?: boolean;
   /** Optional line under the title (level name, round, score to win). */
   subtitle?: string;
+  /** Current frame rate — shown so a slowdown is visible, not guessed at. */
+  fps?: number;
 }
 
 export function drawHud(
@@ -476,6 +481,14 @@ export function drawHud(
   ctx.fillStyle = opt.accent;
   ctx.font = `800 16px ${FONT}`;
   ctx.fillText(opt.title, pad, 26);
+  if (opt.fps !== undefined) {
+    const bad = opt.fps < 50;
+    ctx.fillStyle = bad ? '#ff4d6d' : 'rgba(255,255,255,0.35)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.round(opt.fps)} fps`, w - pad, 26);
+    ctx.textAlign = 'left';
+  }
   if (opt.subtitle) {
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.font = `500 12px ${FONT}`;

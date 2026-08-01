@@ -40,6 +40,10 @@ export class App {
   width = 0;
   height = 0;
   time = 0;
+  /** Smoothed frame rate, shown in the HUD so slowdowns are visible. */
+  fps = 60;
+  private fpsAcc = 0;
+  private fpsFrames = 0;
 
   private scene: Scene | null = null;
   private raf = 0;
@@ -101,6 +105,14 @@ export class App {
       this.last = now;
       this.time += dt;
 
+      this.fpsAcc += dt;
+      this.fpsFrames++;
+      if (this.fpsAcc >= 0.5) {
+        this.fps = this.fpsFrames / this.fpsAcc;
+        this.fpsAcc = 0;
+        this.fpsFrames = 0;
+      }
+
       this.scene?.update(dt);
       this.input.endFrame();
 
@@ -121,11 +133,22 @@ export class App {
 
   private dpr = 1;
 
+  /** Above this many device pixels the glow-heavy renderer starts to cost real
+   *  milliseconds, so back the density off instead of dropping frames. */
+  private static readonly MAX_PIXELS = 3_200_000;
+
   private resize = (): void => {
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.width = this.canvas.clientWidth || window.innerWidth;
     this.height = this.canvas.clientHeight || window.innerHeight;
-    this.canvas.width = Math.round(this.width * this.dpr);
-    this.canvas.height = Math.round(this.height * this.dpr);
+
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const area = this.width * this.height;
+    if (area * dpr * dpr > App.MAX_PIXELS) {
+      dpr = Math.max(1, Math.sqrt(App.MAX_PIXELS / area));
+    }
+    this.dpr = dpr;
+
+    this.canvas.width = Math.round(this.width * dpr);
+    this.canvas.height = Math.round(this.height * dpr);
   };
 }

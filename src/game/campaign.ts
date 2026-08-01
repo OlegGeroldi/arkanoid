@@ -213,6 +213,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
         title: opts.title,
         accent: '#4de2ff',
         subtitle: `${arena.level.name} · ${index + 1}/${levels.length}`,
+        fps: app.fps,
       });
       ctx.restore();
     },

@@ -332,10 +332,9 @@ export class Arena {
     const speed = PADDLE_SPEED * this.stats.paddleSpeedMul;
 
     if (input.pointer !== null) {
-      const target = this.timers.invert > 0 ? ARENA_W - input.pointer : input.pointer;
-      const d = target - this.paddleX;
-      const step = speed * 1.7 * dt;
-      this.paddleX += clamp(d, -step, step);
+      // The paddle tracks the mouse 1:1. Rate-limiting it here felt like input
+      // lag, which is fatal in a game about being under the ball in time.
+      this.paddleX = this.timers.invert > 0 ? ARENA_W - input.pointer : input.pointer;
     } else {
       let dir = 0;
       if (input.left) dir -= 1;

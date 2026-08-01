@@ -29,6 +29,10 @@ export class Sfx {
   private muted = false;
   /** Rate limit: a multiball frenzy must not turn into a wall of clicks. */
   private lastAt = new Map<SfxName, number>();
+  /** Live voice count. Nodes are disconnected when they finish, but a burst of
+   *  simultaneous hits could still pile up faster than they retire. */
+  private voices = 0;
+  private static readonly MAX_VOICES = 24;
 
   setVolume(v: number): void {
     this.volume = Math.max(0, Math.min(1, v));
@@ -75,7 +79,7 @@ export class Sfx {
   ): void {
     const ctx = this.ctx;
     const master = this.master;
-    if (!ctx || !master) return;
+    if (!ctx || !master || this.voices >= Sfx.MAX_VOICES) return;
 
     const t0 = ctx.currentTime + (opts.delay ?? 0);
     const osc = ctx.createOscillator();
@@ -90,6 +94,12 @@ export class Sfx {
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
 
     osc.connect(gain).connect(master);
+    this.voices++;
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+      this.voices--;
+    };
     osc.start(t0);
     osc.stop(t0 + duration + 0.02);
   }
@@ -98,7 +108,7 @@ export class Sfx {
   private hit(duration: number, opts: { freq?: number; q?: number; gain?: number; type?: BiquadFilterType } = {}): void {
     const ctx = this.ctx;
     const master = this.master;
-    if (!ctx || !master || !this.noise) return;
+    if (!ctx || !master || !this.noise || this.voices >= Sfx.MAX_VOICES) return;
 
     const t0 = ctx.currentTime;
     const src = ctx.createBufferSource();
@@ -112,6 +122,13 @@ export class Sfx {
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
 
     src.connect(filter).connect(gain).connect(master);
+    this.voices++;
+    src.onended = () => {
+      src.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+      this.voices--;
+    };
     src.start(t0);
     src.stop(t0 + duration + 0.02);
   }
