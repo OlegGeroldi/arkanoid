@@ -1,6 +1,8 @@
 import { MAX_FRAME } from './core/constants';
 import { InputHub } from './game/input';
 import { loadProfile, saveProfile, type Profile } from './core/storage';
+import { sfx } from './audio/sfx';
+import { music } from './audio/music';
 
 export interface Scene {
   update(dt: number): void;
@@ -54,6 +56,24 @@ export class App {
 
     this.resize();
     window.addEventListener('resize', this.resize);
+    this.initAudio();
+  }
+
+  /** Browsers block audio until the user interacts, so the whole audio layer
+   *  comes up on the first click or keypress. */
+  private initAudio(): void {
+    sfx.setVolume(this.profile.sfxVolume);
+    music.setVolume(this.profile.musicVolume);
+    music.setEnabled(this.profile.musicOn);
+
+    const start = (): void => {
+      sfx.unlock();
+      void music.load().then(() => music.unlock());
+      window.removeEventListener('pointerdown', start);
+      window.removeEventListener('keydown', start);
+    };
+    window.addEventListener('pointerdown', start);
+    window.addEventListener('keydown', start);
   }
 
   setScene(factory: SceneFactory): void {

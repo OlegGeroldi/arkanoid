@@ -1,3 +1,5 @@
+import type { BallTypeId } from './balls';
+
 export type PowerupId =
   | 'expand'
   | 'shrink'
@@ -10,7 +12,12 @@ export type PowerupId =
   | 'shield'
   | 'pierce'
   | 'xp'
-  | 'energy';
+  | 'energy'
+  | 'ballLava'
+  | 'ballAqua'
+  | 'ballLaser'
+  | 'ballPlasma'
+  | 'ballVoid';
 
 export interface PowerupDef {
   id: PowerupId;
@@ -24,6 +31,8 @@ export interface PowerupDef {
   bad?: boolean;
   /** Seconds, for timed effects. */
   duration?: number;
+  /** Elemental ball this capsule grants, if any. */
+  ball?: BallTypeId;
 }
 
 export const POWERUPS: Record<PowerupId, PowerupDef> = {
@@ -39,6 +48,13 @@ export const POWERUPS: Record<PowerupId, PowerupDef> = {
   pierce: { id: 'pierce', letter: 'X', name: 'Пробой', desc: 'Мяч прошивает кирпичи', color: '#ff7a3d', weight: 5, duration: 9 },
   xp: { id: 'xp', letter: 'O', name: 'Опыт', desc: 'Сразу порция опыта', color: '#ffd24d', weight: 9 },
   energy: { id: 'energy', letter: 'U', name: 'Энергия', desc: '+35 к заряду супера', color: '#b06bff', weight: 8 },
+
+  // Elemental balls: these recolour every ball in play and change how it hits.
+  ballLava: { id: 'ballLava', letter: 'M', name: 'Лава-болл', desc: 'Огненный пробивающий мяч', color: '#ff6a2b', weight: 6, ball: 'lava' },
+  ballAqua: { id: 'ballAqua', letter: 'A', name: 'Аква-болл', desc: 'Медленный мяч с волной', color: '#3ad9ff', weight: 6, ball: 'aqua' },
+  ballLaser: { id: 'ballLaser', letter: 'Z', name: 'Лазер-болл', desc: 'Мяч стреляет лучами', color: '#7dff6a', weight: 5, ball: 'laser' },
+  ballPlasma: { id: 'ballPlasma', letter: 'Q', name: 'Плазма-болл', desc: 'Цепная молния', color: '#c46bff', weight: 5, ball: 'plasma' },
+  ballVoid: { id: 'ballVoid', letter: 'G', name: 'Войд-болл', desc: 'Тяжёлый мяч с притяжением', color: '#8a7bff', weight: 4, ball: 'void' },
 };
 
 export const POWERUP_LIST: PowerupDef[] = Object.values(POWERUPS);

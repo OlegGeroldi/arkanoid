@@ -1,5 +1,5 @@
 import { App, type Scene } from '../app';
-import { BUILTIN_LEVELS } from '../core/builtinLevels';
+import { CAMPAIGN_LEVELS, CAMPAIGN_SIZE, CHAOS_FROM, levelTier } from '../core/campaignLevels';
 import type { LevelData } from '../core/level';
 import { accountLevel, isSuperUnlocked, loadUserLevels } from '../core/storage';
 import { SUPER_LIST, SUPERS, type SuperId } from '../core/supers';
@@ -9,6 +9,9 @@ import { versusScene } from '../game/versus';
 import { duelScene } from '../game/duel';
 import { editorScene } from '../editor/editor';
 import { button, el } from './dom';
+import { music } from '../audio/music';
+import { sfx } from '../audio/sfx';
+import { BALL_TYPE_LIST } from '../core/balls';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -57,6 +60,7 @@ export function mainMenu(app: App): Scene {
             'div',
             { style: 'text-align:right' },
             el('p', { class: 'hint' }, `Счёт PvP: ${app.profile.versusWins[0]} : ${app.profile.versusWins[1]}`),
+            el('p', { class: 'hint' }, `Пройдено уровней: ${app.profile.campaignReached} / ${CAMPAIGN_SIZE}`),
             el('p', { class: 'hint' }, `Своих уровней: ${userLevels.length}`),
           ),
         ),
@@ -64,7 +68,10 @@ export function mainMenu(app: App): Scene {
         el(
           'div',
           { class: 'grid c3' },
-          modeCard('🎯', 'Кампания', '10 уровней, опыт, усиления и суперудары', () => screenSolo(BUILTIN_LEVELS, 'Кампания')),
+          modeCard('🎯', 'Кампания', `${CAMPAIGN_SIZE} уровней: с ${CHAOS_FROM}-го — хаос и хардкор`, () =>
+            screenSolo(CAMPAIGN_LEVELS, 'Кампания', { campaign: true }),
+          ),
+          modeCard('🗺', 'Выбор уровня', `Начать с любого из ${CAMPAIGN_SIZE} уровней кампании`, () => screenLevelSelect()),
           modeCard(
             '🧱',
             'Свои уровни',
@@ -74,7 +81,8 @@ export function mainMenu(app: App): Scene {
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),
           modeCard('🛠', 'Редактор уровней', 'Рисуйте поля, тестируйте, экспортируйте', () => screenEditor()),
-          modeCard('⌨️', 'Управление и правила', 'Клавиши, бонусы, типы кирпичей', () => screenHelp()),
+          modeCard('🔊', 'Звук и музыка', 'Громкость эффектов, свои треки из Suno', () => screenAudio()),
+          modeCard('⌨️', 'Управление и правила', 'Клавиши, бонусы, шары, кирпичи', () => screenHelp()),
         ),
       ),
     );
@@ -118,9 +126,58 @@ export function mainMenu(app: App): Scene {
     return grid;
   }
 
+  // ----------------------------------------------------------- level select --
+
+  function screenLevelSelect(): void {
+    const reached = app.profile.campaignReached;
+    const grid = el('div', { class: 'level-grid' });
+
+    CAMPAIGN_LEVELS.forEach((level, i) => {
+      const tier = levelTier(i);
+      const best = i + 1 <= reached;
+      grid.append(
+        el(
+          'button',
+          {
+            class: `level-cell ${tier}${best ? ' reached' : ''}`,
+            title: `${level.name} · скорость мяча ${(level.ballSpeed ?? 1).toFixed(2)}×`,
+            onclick: () => {
+              sfx.play('ui');
+              screenSolo(CAMPAIGN_LEVELS, `Кампания · ${i + 1}`, { campaign: true, startIndex: i });
+            },
+          },
+          String(i + 1),
+        ),
+      );
+    });
+
+    show(
+      el(
+        'div',
+        { class: 'screen' },
+        el('h2', {}, 'Выбор уровня'),
+        el(
+          'p',
+          { class: 'hint' },
+          `Забег продолжается с выбранного уровня и идёт до ${CAMPAIGN_SIZE}-го. Уровни с ${CHAOS_FROM}-го генерируются случайно и не жалеют никого.`,
+        ),
+        el(
+          'div',
+          { class: 'row', style: 'gap:8px;margin:12px 0' },
+          el('span', { class: 'pill' }, 'Пройдено: ' + reached),
+          el('span', { class: 'pill' }, '1–10 · вручную'),
+          el('span', { class: 'pill amber' }, `11–${CHAOS_FROM - 1} · генератор`),
+          el('span', { class: 'pill pink' }, `${CHAOS_FROM}–${CAMPAIGN_SIZE} · хаос`),
+        ),
+        grid,
+        el('div', { class: 'row', style: 'margin-top:20px' }, button('Назад', screenMain, 'btn ghost')),
+      ),
+    );
+  }
+
   // ------------------------------------------------------------ solo setup --
 
-  function screenSolo(levels: LevelData[], title: string): void {
+  function screenSolo(levels: LevelData[], title: string, opts: { campaign?: boolean; startIndex?: number } = {}): void {
     let chosen: SuperId = app.profile.favouriteSuper;
     if (!isSuperUnlocked(app.profile, chosen)) chosen = 'barrage';
 
@@ -130,7 +187,11 @@ export function mainMenu(app: App): Scene {
           'div',
           { class: 'screen' },
           el('h2', {}, title),
-          el('p', { class: 'hint' }, `${levels.length} уровней. Опыт копится внутри забега — каждый новый уровень мастерства даёт выбор из трёх усилений.`),
+          el(
+            'p',
+            { class: 'hint' },
+            `${levels.length} уровней${opts.startIndex ? `, старт с ${opts.startIndex + 1}-го` : ''}. Опыт копится внутри забега — каждый новый уровень мастерства даёт выбор из трёх усилений.`,
+          ),
           el('h3', { style: 'margin-top:18px' }, 'Суперудар'),
           superPicker(chosen, (id) => {
             chosen = id;
@@ -140,8 +201,21 @@ export function mainMenu(app: App): Scene {
           el(
             'div',
             { class: 'row', style: 'margin-top:22px' },
-            button('Начать', () => app.setScene((a) => soloScene(a, { levels, superId: chosen, title })), 'btn primary'),
-            button('Назад', screenMain, 'btn ghost'),
+            button(
+              'Начать',
+              () =>
+                app.setScene((a) =>
+                  soloScene(a, {
+                    levels,
+                    superId: chosen,
+                    title,
+                    startIndex: opts.startIndex ?? 0,
+                    trackProgress: opts.campaign === true,
+                  }),
+                ),
+              'btn primary',
+            ),
+            button('Назад', opts.campaign ? screenLevelSelect : screenMain, 'btn ghost'),
           ),
         ),
       );
@@ -153,7 +227,7 @@ export function mainMenu(app: App): Scene {
 
   function screenVersus(kind: 'split' | 'duel'): void {
     const userLevels = loadUserLevels();
-    const pool = [...BUILTIN_LEVELS, ...userLevels];
+    const pool = [...CAMPAIGN_LEVELS, ...userLevels];
     let p1: SuperId = app.profile.favouriteSuper;
     let p2: SuperId = app.profile.p2Super;
     let levelIndex = 2;
@@ -253,6 +327,101 @@ export function mainMenu(app: App): Scene {
     render();
   }
 
+  // ----------------------------------------------------------------- audio --
+
+  function screenAudio(): void {
+    const render = (): void => {
+      const p = app.profile;
+      const track = music.nowPlaying;
+
+      show(
+        el(
+          'div',
+          { class: 'screen narrow' },
+          el('h2', {}, 'Звук и музыка'),
+          el(
+            'p',
+            { class: 'hint' },
+            'Звуковые эффекты синтезируются на лету — файлов нет, задержки тоже. Музыка подключается своими треками.',
+          ),
+
+          el(
+            'label',
+            { class: 'field', style: 'margin-top:14px' },
+            `Эффекты: ${Math.round(p.sfxVolume * 100)}%`,
+            el('input', {
+              type: 'range',
+              min: '0',
+              max: '100',
+              value: String(Math.round(p.sfxVolume * 100)),
+              oninput: (e: Event) => {
+                const v = Number((e.target as HTMLInputElement).value) / 100;
+                app.saveProfile((prof) => (prof.sfxVolume = v));
+                sfx.setVolume(v);
+              },
+              onchange: () => {
+                sfx.play('powerup');
+                render();
+              },
+            }),
+          ),
+
+          el(
+            'label',
+            { class: 'field' },
+            `Музыка: ${Math.round(p.musicVolume * 100)}%`,
+            el('input', {
+              type: 'range',
+              min: '0',
+              max: '100',
+              value: String(Math.round(p.musicVolume * 100)),
+              oninput: (e: Event) => {
+                const v = Number((e.target as HTMLInputElement).value) / 100;
+                app.saveProfile((prof) => (prof.musicVolume = v));
+                music.setVolume(v);
+              },
+              onchange: render,
+            }),
+          ),
+
+          el(
+            'div',
+            { class: 'row', style: 'margin-top:10px' },
+            button(
+              p.musicOn ? 'Музыка включена' : 'Музыка выключена',
+              () => {
+                const on = !app.profile.musicOn;
+                app.saveProfile((prof) => (prof.musicOn = on));
+                music.setEnabled(on);
+                render();
+              },
+              `btn small${p.musicOn ? ' primary' : ''}`,
+            ),
+            music.available ? button('Следующий трек', () => { music.next(); setTimeout(render, 300); }, 'btn small') : null,
+          ),
+
+          el(
+            'p',
+            { class: 'hint', style: 'margin-top:14px' },
+            music.available
+              ? `Сейчас играет: ${track?.title ?? track?.file ?? '—'}`
+              : 'Треков нет. Положите файлы в public/music и опишите их в public/music/manifest.json — инструкция лежит там же в README.md.',
+          ),
+          el(
+            'pre',
+            {
+              class: 'code',
+            },
+            '{\n  "tracks": [\n    { "file": "menu.mp3", "title": "Standby", "scene": "menu" },\n    { "file": "drive.mp3", "title": "Neon Drive", "scene": "game" },\n    { "file": "duel.mp3", "title": "Duel", "scene": "versus" }\n  ]\n}',
+          ),
+
+          el('div', { class: 'row', style: 'margin-top:18px' }, button('Назад', screenMain, 'btn primary')),
+        ),
+      );
+    };
+    render();
+  }
+
   // ---------------------------------------------------------------- editor --
 
   function screenEditor(): void {
@@ -306,6 +475,19 @@ export function mainMenu(app: App): Scene {
               { class: 'hint' },
               'Шкала супера копится от урона и подобранных бонусов. В PvP каждый суперудар одновременно бьёт по сопернику — это главный инструмент давления.',
             ),
+            el('h3', { style: 'margin-top:14px' }, 'Элементальные шары'),
+            el(
+              'div',
+              { class: 'col', style: 'gap:4px' },
+              ...BALL_TYPE_LIST.filter((b) => b.id !== 'normal').map((b) =>
+                el(
+                  'p',
+                  { class: 'hint', style: 'margin:0' },
+                  el('b', { style: `color:${b.color}` }, `${b.name}: `),
+                  b.desc,
+                ),
+              ),
+            ),
           ),
         ),
         el('div', { class: 'row', style: 'margin-top:22px' }, button('Назад', screenMain, 'btn primary')),
@@ -315,6 +497,7 @@ export function mainMenu(app: App): Scene {
 
   const row = (k: string, v: string): HTMLElement => el('tr', {}, el('td', {}, k), el('td', {}, v));
 
+  music.setScene('menu');
   screenMain();
 
   return {

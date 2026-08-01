@@ -29,6 +29,8 @@ import { P1_KEYS, P2_KEYS, type Bindings } from './input';
 import { FixedStepper } from './stepper';
 import { button, el } from '../ui/dom';
 import { mainMenu } from '../ui/menu';
+import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
 
 const SCENE_W = ARENA_W;
 const SCENE_H = ARENA_H;
@@ -192,6 +194,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
 
   buildField();
   serve(rng.chance(0.5) ? 0 : 1);
+  music.setScene('versus');
 
   function damage(brick: Brick, dmg: number, by: 0 | 1): void {
     if (!brick.alive) return;
@@ -202,8 +205,10 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
     f.energy = Math.min(ENERGY_MAX, f.energy + ENERGY_PER_DAMAGE);
     if (brick.hp > 0) {
       f.fx.burst(brick.x + BRICK_W / 2, brick.y + BRICK_H / 2, brick.kind.color, 4, 90);
+      sfx.play('wall');
       return;
     }
+    sfx.play('brick');
     // Bricks feed super energy; only goals move the score.
     brick.alive = false;
     f.fx.burst(brick.x + BRICK_W / 2, brick.y + BRICK_H / 2, brick.kind.color, 14);
@@ -224,6 +229,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
     f.energy = 0;
     f.activeT = SUPERS[f.superId].duration;
     f.fx.text(ARENA_W / 2, ARENA_H / 2, SUPERS[f.superId].name.toUpperCase(), SUPERS[f.superId].color);
+    sfx.play('super');
     const foe = fighters[1 - f.index];
 
     switch (f.superId) {
@@ -281,6 +287,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
     ball.speed = Math.min(BALL_SPEED_MAX, ball.speed + 6);
     f.energy = Math.min(ENERGY_MAX, f.energy + 2);
     f.fx.burst(ball.x, ball.y, f.accent, 6, 110);
+    sfx.play('paddle');
   }
 
   function goal(scorer: 0 | 1): void {
@@ -288,6 +295,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
     const f = fighters[scorer];
     f.score++;
     f.fx.text(ARENA_W / 2, ARENA_H / 2, 'ГОЛ!', f.accent);
+    sfx.play('goal');
     fighters[0].energy = Math.min(ENERGY_MAX, fighters[0].energy + 12);
     fighters[1].energy = Math.min(ENERGY_MAX, fighters[1].energy + 12);
     if (f.score >= opts.target) return finish(f);

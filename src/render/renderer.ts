@@ -12,6 +12,7 @@ import {
   WALL,
 } from '../core/constants';
 import type { Arena } from '../core/arena';
+import { BALL_TYPES } from '../core/balls';
 import { SUPERS } from '../core/supers';
 import type { ArenaFx } from './fx';
 import { clamp } from '../core/math';
@@ -63,7 +64,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, arena: Arena, fx: Arena
   drawPowerups(ctx, arena);
   drawLasers(ctx, arena);
   drawPaddle(ctx, arena, t);
-  drawBalls(ctx, arena);
+  drawBalls(ctx, arena, t);
   drawShield(ctx, arena);
   fx.draw(ctx);
   drawHazards(ctx, arena, t);
@@ -216,31 +217,54 @@ function drawPaddle(ctx: CanvasRenderingContext2D, arena: Arena, t: number): voi
   ctx.restore();
 }
 
-function drawBalls(ctx: CanvasRenderingContext2D, arena: Arena): void {
+function drawBalls(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void {
   for (const b of arena.balls) {
+    const element = BALL_TYPES[b.type];
     const fire = b.fireT > 0;
     const pierce = b.pierceT > 0 || arena.timers.pierce > 0;
-    const color = fire ? '#ffb24d' : pierce ? '#ff7a3d' : '#ffffff';
+
+    let color = element.color;
+    let trail = element.trail;
+    let glow = element.glow;
+    if (b.type === 'normal' && (fire || pierce)) {
+      color = fire ? '#ffb24d' : '#ff7a3d';
+      trail = color;
+      glow = fire ? 26 : 18;
+    }
+    // Blink out over the last two seconds of an element.
+    const expiring = b.type !== 'normal' && b.typeT > 0 && b.typeT < 2;
+    const pulse = expiring && Math.sin(t * 26) < 0;
+    if (pulse) {
+      color = '#ffffff';
+      trail = '#ffffff';
+    }
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < b.trail.length; i++) {
       const p = b.trail[i];
-      const a = (i / b.trail.length) * 0.35;
-      ctx.globalAlpha = a;
-      ctx.fillStyle = color;
+      const k = i / b.trail.length;
+      ctx.globalAlpha = k * 0.4;
+      ctx.fillStyle = trail;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, b.r * (0.35 + (i / b.trail.length) * 0.6), 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, b.r * (0.35 + k * 0.7), 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
 
     ctx.save();
     ctx.shadowColor = color;
-    ctx.shadowBlur = fire ? 26 : 14;
+    ctx.shadowBlur = glow;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+    // Bright core keeps the ball readable against its own glow.
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(b.x - b.r * 0.22, b.y - b.r * 0.22, b.r * 0.42, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -517,6 +541,11 @@ export function drawHud(
   if (!opt.compact) {
     // Active effects
     const active: [string, number, string][] = [];
+    const elemental = arena.balls.find((b) => b.type !== 'normal');
+    if (elemental) {
+      const el = BALL_TYPES[elemental.type];
+      active.push([el.name, elemental.typeT, el.color]);
+    }
     const tm = arena.timers;
     if (tm.expand > 0) active.push(['Расширение', tm.expand, '#4de2ff']);
     if (tm.shrink > 0) active.push(['Сжатие', tm.shrink, '#ff4d6d']);

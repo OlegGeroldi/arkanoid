@@ -199,6 +199,54 @@ label.field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; 
   touch-action: none;
 }
 
+/* ---------------------------------------------------------- level select -- */
+
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 6px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 4px;
+}
+.level-cell {
+  font: inherit;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 10px 0;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.level-cell:hover { transform: translateY(-2px); border-color: var(--cyan); }
+.level-cell.easy { border-color: rgba(61, 220, 132, 0.35); }
+.level-cell.normal { border-color: rgba(77, 226, 255, 0.3); }
+.level-cell.hard { border-color: rgba(255, 210, 77, 0.35); }
+.level-cell.chaos {
+  border-color: rgba(255, 77, 109, 0.5);
+  background: linear-gradient(140deg, rgba(255, 77, 109, 0.14), rgba(176, 107, 255, 0.14));
+}
+.level-cell.reached { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.level-cell.reached::after { content: " ✓"; font-size: 9px; opacity: 0.6; }
+
+input[type="range"] { accent-color: var(--cyan); width: 100%; }
+
+pre.code {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
 .toast {
   position: fixed;
   left: 50%;

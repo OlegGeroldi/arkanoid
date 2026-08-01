@@ -11,9 +11,14 @@ export interface Profile {
   bestScore: number;
   runs: number;
   campaignCleared: number;
+  /** Highest campaign level reached, 1-based. Level select unlocks up to here. */
+  campaignReached: number;
   versusWins: [number, number];
   favouriteSuper: SuperId;
   p2Super: SuperId;
+  sfxVolume: number;
+  musicVolume: number;
+  musicOn: boolean;
 }
 
 const defaultProfile = (): Profile => ({
@@ -22,9 +27,13 @@ const defaultProfile = (): Profile => ({
   bestScore: 0,
   runs: 0,
   campaignCleared: 0,
+  campaignReached: 1,
   versusWins: [0, 0],
   favouriteSuper: 'barrage',
   p2Super: 'meteor',
+  sfxVolume: 0.7,
+  musicVolume: 0.45,
+  musicOn: true,
 });
 
 function read<T>(key: string, fallback: T): T {
@@ -45,11 +54,18 @@ function write(key: string, value: unknown): void {
   }
 }
 
+const clamp01 = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
+
 export function loadProfile(): Profile {
   const p = { ...defaultProfile(), ...read<Partial<Profile>>(PROFILE_KEY, {}) };
   if (!(p.favouriteSuper in SUPERS)) p.favouriteSuper = 'barrage';
   if (!(p.p2Super in SUPERS)) p.p2Super = 'meteor';
   if (!Array.isArray(p.versusWins) || p.versusWins.length !== 2) p.versusWins = [0, 0];
+  p.campaignReached = Math.max(1, Math.floor(p.campaignReached ?? 1));
+  p.sfxVolume = clamp01(p.sfxVolume, 0.7);
+  p.musicVolume = clamp01(p.musicVolume, 0.45);
+  p.musicOn = p.musicOn !== false;
   return p as Profile;
 }
 

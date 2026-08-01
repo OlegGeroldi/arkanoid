@@ -34,10 +34,11 @@ import {
 import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
 import { BRICK_KINDS, type Brick } from './bricks';
+import { BALL_TYPES, type BallTypeId } from './balls';
 import { buildBricks, breakableCount, type LevelData } from './level';
 import { POWERUP_LIST, POWERUPS, type FallingPowerup, type PowerupId } from './powerups';
 import { SUPERS, type SuperId } from './supers';
-import { baseStats, rollPerks, xpForLevel, type Perk, type RunStats } from './progression';
+import { baseStats, rollPerks, xpForLevel, XP_RATE, type Perk, type RunStats } from './progression';
 
 export type ArenaMode = 'solo' | 'versus';
 
@@ -54,6 +55,9 @@ export interface Ball {
   held: number | null;
   pierceT: number;
   fireT: number;
+  /** Elemental state: drives the ball's colour and what its hits do. */
+  type: BallTypeId;
+  typeT: number;
   trail: { x: number; y: number }[];
 }
 
@@ -72,6 +76,7 @@ export type ArenaEvent =
   | { t: 'lifeLost' }
   | { t: 'levelup'; level: number }
   | { t: 'super'; id: SuperId }
+  | { t: 'ballType'; id: BallTypeId }
   | { t: 'attack'; power: number }
   | { t: 'cleared' }
   | { t: 'dead' }
@@ -372,8 +377,20 @@ export class Arena {
       held,
       pierceT: 0,
       fireT: 0,
+      type: 'normal',
+      typeT: 0,
       trail: [],
     };
+  }
+
+  /** Recolours every ball in play and gives it an element for a while. */
+  setBallType(id: BallTypeId): void {
+    const def = BALL_TYPES[id];
+    for (const b of this.balls) {
+      b.type = id;
+      b.typeT = def.duration;
+    }
+    this.events.push({ t: 'ballType', id });
   }
 
   private spawnServeBalls(): void {
@@ -417,9 +434,14 @@ export class Arena {
       const ball = this.balls[i];
       if (ball.pierceT > 0) ball.pierceT -= dt;
       if (ball.fireT > 0) ball.fireT -= dt;
+      if (ball.typeT > 0) {
+        ball.typeT -= dt;
+        if (ball.typeT <= 0) ball.type = 'normal';
+      }
       if (ball.held !== null) continue;
 
-      const speed = clamp(ball.baseSpeed * globalMul, 60, BALL_SPEED_MAX);
+      if (ball.type === 'void') this.voidPull(ball, dt);
+      const speed = clamp(ball.baseSpeed * globalMul * BALL_TYPES[ball.type].speed, 60, BALL_SPEED_MAX);
       setSpeed(ball, speed);
       avoidShallow(ball);
 
@@ -492,8 +514,29 @@ export class Arena {
     return true;
   }
 
+  /** Void balls bend toward the nearest live brick instead of flying blind. */
+  private voidPull(ball: Ball, dt: number): void {
+    if (ball.vy > 0) return;
+    let best: Brick | null = null;
+    let bestD = Infinity;
+    for (const b of this.bricks) {
+      if (!b.alive || b.kind.hp < 0) continue;
+      const dx = b.x + BRICK_W / 2 - ball.x;
+      const dy = b.y + BRICK_H / 2 - ball.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = b;
+      }
+    }
+    if (!best) return;
+    const dir = best.x + BRICK_W / 2 - ball.x;
+    ball.vx += clamp(dir, -1, 1) * 110 * dt;
+  }
+
   private collideBricks(ball: Ball): void {
-    const piercing = ball.pierceT > 0 || ball.fireT > 0 || this.timers.pierce > 0;
+    const element = BALL_TYPES[ball.type];
+    const piercing = ball.pierceT > 0 || ball.fireT > 0 || this.timers.pierce > 0 || element.pierce;
     const minC = Math.floor((ball.x - ball.r) / BRICK_W) - 1;
     const maxC = Math.floor((ball.x + ball.r) / BRICK_W) + 1;
     const minR = Math.floor((ball.y - ball.r - GRID_TOP) / BRICK_H) - 1;
@@ -524,13 +567,60 @@ export class Arena {
           }
         }
 
-        let dmg = this.stats.ballDamage;
+        let dmg = this.stats.ballDamage + element.damage;
         if (this.stats.critChance > 0 && this.rng.chance(this.stats.critChance)) dmg *= 2;
         if (ball.fireT > 0) dmg += 2;
         this.damageBrick(brick, dmg);
         if (ball.fireT > 0) this.explode(brick, 1.1);
+        this.elementalImpact(ball, brick);
         if (!piercing) return;
       }
+    }
+  }
+
+  /** What each elemental ball does on top of plain damage. */
+  private elementalImpact(ball: Ball, brick: Brick): void {
+    const cx = brick.x + BRICK_W / 2;
+    const cy = brick.y + BRICK_H / 2;
+
+    switch (ball.type) {
+      case 'lava':
+        this.explode(brick, 1.2);
+        break;
+
+      case 'aqua': {
+        // A wave washes sideways along the row.
+        for (const dc of [-2, -1, 1, 2]) {
+          const other = this.cellAt(brick.col + dc, brick.row);
+          if (other) this.damageBrick(other, Math.abs(dc) === 1 ? 1 : 0.5);
+        }
+        this.events.push({ t: 'hit', x: cx, y: cy, color: BALL_TYPES.aqua.color });
+        break;
+      }
+
+      case 'laser':
+        this.lasers.push({ x: cx - 7, y: cy, vy: -LASER_SPEED });
+        this.lasers.push({ x: cx + 7, y: cy, vy: -LASER_SPEED });
+        break;
+
+      case 'plasma': {
+        // Chain lightning to the two closest live bricks.
+        const targets = this.bricks
+          .filter((b) => b.alive && b !== brick && b.kind.hp > 0)
+          .map((b) => ({ b, d: (b.col - brick.col) ** 2 + (b.row - brick.row) ** 2 }))
+          .filter((t) => t.d <= 16)
+          .sort((a, z) => a.d - z.d)
+          .slice(0, 2);
+        for (const { b } of targets) {
+          this.damageBrick(b, 1);
+          this.events.push({ t: 'hit', x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, color: BALL_TYPES.plasma.color });
+        }
+        break;
+      }
+
+      case 'void':
+      case 'normal':
+        break;
     }
   }
 
@@ -642,14 +732,17 @@ export class Arena {
 
   private updatePowerups(dt: number): void {
     const half = this.paddleW / 2;
+    // A void ball drags capsules toward the paddle even without the magnet perk.
+    const magnet = this.stats.magnet + (this.balls.some((b) => b.type === 'void') ? 0.6 : 0);
+
     for (let i = this.powerups.length - 1; i >= 0; i--) {
       const p = this.powerups[i];
       p.y += p.vy * dt;
       p.spin += dt * 3;
 
-      if (this.stats.magnet > 0 && p.y > ARENA_H * 0.45) {
+      if (magnet > 0 && p.y > ARENA_H * 0.45) {
         const dx = this.paddleX - (p.x + POWERUP_W / 2);
-        p.x += clamp(dx, -1, 1) * this.stats.magnet * 130 * dt;
+        p.x += clamp(dx, -1, 1) * magnet * 130 * dt;
       }
 
       const caught =
@@ -714,6 +807,14 @@ export class Arena {
         break;
       case 'energy':
         this.energy = Math.min(ENERGY_MAX, this.energy + 35);
+        break;
+      case 'ballLava':
+      case 'ballAqua':
+      case 'ballLaser':
+      case 'ballPlasma':
+      case 'ballVoid':
+        if (this.balls.length === 0) this.addBall();
+        this.setBallType(def.ball!);
         break;
     }
   }
@@ -876,7 +977,7 @@ export class Arena {
   // -------------------------------------------------------------------- xp --
 
   addXp(amount: number): void {
-    const gain = amount * this.stats.xpMul;
+    const gain = amount * this.stats.xpMul * XP_RATE;
     this.xpTotal += gain;
     this.xpEarned += gain;
     this.xpInto += gain;

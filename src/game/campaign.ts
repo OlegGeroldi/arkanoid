@@ -9,6 +9,8 @@ import { SOLO_KEYS } from './input';
 import { edgeOnce, FixedStepper } from './stepper';
 import { el, button } from '../ui/dom';
 import { mainMenu } from '../ui/menu';
+import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -23,12 +25,16 @@ export interface SoloOptions {
   endless?: boolean;
   /** Where "back" goes — the editor uses this to return to what you were building. */
   onExit?: (app: App) => Scene;
+  /** Start the run partway in (level select). */
+  startIndex?: number;
+  /** Record the furthest level reached in the profile. */
+  trackProgress?: boolean;
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
   const levels = opts.levels.length ? opts.levels : [];
-  let index = 0;
-  let arena = new Arena({ level: levels[0], superId: opts.superId, mode: 'solo' });
+  let index = Math.min(Math.max(opts.startIndex ?? 0, 0), Math.max(levels.length - 1, 0));
+  let arena = new Arena({ level: levels[index], superId: opts.superId, mode: 'solo' });
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
   let layout = { scale: 1, ox: 0, oy: 0 };
@@ -39,6 +45,8 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   let panelOpen = false;
   let t = 0;
   const exit = opts.onExit ?? mainMenu;
+  music.setScene('game');
+  markReached();
 
   function bank(): void {
     const earned = Math.round(arena.xpEarned);
@@ -47,6 +55,14 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       p.runs += 1;
       p.bestScore = Math.max(p.bestScore, arena.score);
       p.favouriteSuper = opts.superId;
+      if (opts.trackProgress) p.campaignReached = Math.max(p.campaignReached, index + 1);
+    });
+  }
+
+  function markReached(): void {
+    if (!opts.trackProgress) return;
+    app.saveProfile((p) => {
+      p.campaignReached = Math.max(p.campaignReached, index + 1);
     });
   }
 
@@ -93,6 +109,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     arena.xpInto = 0;
     arena.energy = Math.min(100, arena.energy);
     fx = new ArenaFx();
+    markReached();
     clearPanel();
   }
 
@@ -172,7 +189,9 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
         arena.state === 'cleared' ? noInput() : app.input.read(SOLO_KEYS, clampPointer(arenaX));
 
       stepper.step(dt, (sdt, first) => arena.update(sdt, edgeOnce(input, first)));
-      fx.consume(arena.drainEvents());
+      const events = arena.drainEvents();
+      fx.consume(events);
+      sfx.consume(events, arena.combo);
 
       if (panelOpen) return;
       if (arena.state === 'cleared') levelCleared();

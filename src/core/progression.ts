@@ -219,6 +219,10 @@ export const PERKS: Perk[] = [
 const PERK_BY_ID = new Map(PERKS.map((p) => [p.id, p]));
 export const getPerk = (id: string): Perk | undefined => PERK_BY_ID.get(id);
 
+/** Global XP throttle. Levelling inside a run is deliberately slow: perks are a
+ *  reward for a long clean streak, not something you collect every screen. */
+export const XP_RATE = 0.1;
+
 /** XP needed to go from `level` to `level + 1` inside a run. */
 export const xpForLevel = (level: number): number => Math.round(85 * Math.pow(level, 1.3));
 

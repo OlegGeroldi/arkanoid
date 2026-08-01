@@ -39,6 +39,9 @@ export const P2_KEYS: Bindings = {
   ],
 };
 
+/** Keys that steer a paddle — pressing one takes control away from the mouse. */
+const MOVEMENT_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD']);
+
 /** Physical-key code for an event. Some environments (remote input, a few
  *  virtual keyboards) send an empty `code`, so fall back to deriving one from
  *  `key` — layout-independent bindings still work everywhere else. */
@@ -64,6 +67,9 @@ export class InputHub {
   pointer: { x: number; y: number } | null = null;
   pointerDown = false;
   clicked = false;
+  /** Whichever device was used last owns the paddle: pressing a movement key
+   *  hands control to the keyboard, moving the mouse takes it back. */
+  private pointerOwns = false;
 
   constructor(private target: HTMLCanvasElement) {
     window.addEventListener('keydown', this.onKeyDown);
@@ -96,6 +102,7 @@ export class InputHub {
     if (code.startsWith('Arrow') || code === 'Space') e.preventDefault();
     this.down.add(code);
     this.pressedNow.add(code);
+    if (MOVEMENT_KEYS.has(code)) this.pointerOwns = false;
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
@@ -108,7 +115,13 @@ export class InputHub {
 
   private setPointer(clientX: number, clientY: number): void {
     const r = this.target.getBoundingClientRect();
-    this.pointer = { x: clientX - r.left, y: clientY - r.top };
+    const next = { x: clientX - r.left, y: clientY - r.top };
+    // Only a real move hands control back to the mouse — a stale hover must not
+    // keep overriding the keyboard.
+    if (!this.pointer || Math.abs(next.x - this.pointer.x) > 0.5 || Math.abs(next.y - this.pointer.y) > 0.5) {
+      this.pointerOwns = true;
+    }
+    this.pointer = next;
   }
 
   private onMouseMove = (e: MouseEvent): void => this.setPointer(e.clientX, e.clientY);
@@ -164,10 +177,14 @@ export class InputHub {
     else if (this.wasPressed(b.picks[1])) pick = 2;
     else if (this.wasPressed(b.picks[2])) pick = 3;
 
+    const left = this.isDown(b.left);
+    const right = this.isDown(b.right);
+    const useMouse = b.mouse === true && this.pointerOwns && !left && !right;
+
     return {
-      left: this.isDown(b.left),
-      right: this.isDown(b.right),
-      pointer: b.mouse ? pointerArenaX : null,
+      left,
+      right,
+      pointer: useMouse ? pointerArenaX : null,
       actionPressed: this.wasPressed(b.action) || (b.mouse === true && this.clicked),
       superPressed: this.wasPressed(b.super),
       pick,

@@ -9,6 +9,8 @@ import { P1_KEYS, P2_KEYS } from './input';
 import { edgeOnce, FixedStepper } from './stepper';
 import { button, el } from '../ui/dom';
 import { mainMenu } from '../ui/menu';
+import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
 
 const HUD_W = 208;
 const GAP = 18;
@@ -58,6 +60,7 @@ export function versusScene(app: App, opts: VersusOptions): Scene {
   });
 
   const sides: [Side, Side] = [make(0), make(1)];
+  music.setScene('versus');
 
   /** A super hits your own field and sabotages the other one. */
   function attack(from: Side, to: Side): void {
@@ -158,6 +161,7 @@ export function versusScene(app: App, opts: VersusOptions): Scene {
         const other = sides[1 - i];
         const events = side.arena.drainEvents();
         side.fx.consume(events);
+        sfx.consume(events, side.arena.combo);
         handle(side, other, events);
       }
     },
