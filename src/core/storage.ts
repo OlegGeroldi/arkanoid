@@ -19,7 +19,14 @@ export interface Profile {
   sfxVolume: number;
   musicVolume: number;
   musicOn: boolean;
+  /** Starting lives for a run. */
+  lives: number;
+  /** Simulation speed multiplier: 1x, 2x or 3x. */
+  gameSpeed: number;
 }
+
+export const LIVES_CHOICES = [1, 3, 5, 9] as const;
+export const SPEED_CHOICES = [1, 2, 3] as const;
 
 const defaultProfile = (): Profile => ({
   name: 'Игрок',
@@ -34,6 +41,8 @@ const defaultProfile = (): Profile => ({
   sfxVolume: 0.7,
   musicVolume: 0.45,
   musicOn: true,
+  lives: 3,
+  gameSpeed: 1,
 });
 
 function read<T>(key: string, fallback: T): T {
@@ -66,6 +75,8 @@ export function loadProfile(): Profile {
   p.sfxVolume = clamp01(p.sfxVolume, 0.7);
   p.musicVolume = clamp01(p.musicVolume, 0.45);
   p.musicOn = p.musicOn !== false;
+  p.lives = LIVES_CHOICES.includes(p.lives as (typeof LIVES_CHOICES)[number]) ? p.lives! : 3;
+  p.gameSpeed = SPEED_CHOICES.includes(p.gameSpeed as (typeof SPEED_CHOICES)[number]) ? p.gameSpeed! : 1;
   return p as Profile;
 }
 

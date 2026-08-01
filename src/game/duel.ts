@@ -44,6 +44,8 @@ export interface DuelOptions {
   supers: [SuperId, SuperId];
   names: [string, string];
   target: number;
+  /** Simulation speed multiplier. */
+  speed?: number;
 }
 
 interface Fighter {
@@ -439,7 +441,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
         superPressed: app.input.wasPressed(f.keys.super),
       }));
 
-      stepper.step(dt, (sdt, first) => {
+      stepper.step(dt * (opts.speed ?? 1), (sdt, first) => {
         if (sdt > 0) {
           slowT = Math.max(0, slowT - sdt);
           magnetT = Math.max(0, magnetT - sdt);

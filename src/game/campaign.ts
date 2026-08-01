@@ -11,6 +11,7 @@ import { el, button } from '../ui/dom';
 import { mainMenu } from '../ui/menu';
 import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
+import { SPEED_CHOICES } from '../core/storage';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -29,12 +30,17 @@ export interface SoloOptions {
   startIndex?: number;
   /** Record the furthest level reached in the profile. */
   trackProgress?: boolean;
+  /** Starting lives. */
+  lives?: number;
+  /** Simulation speed multiplier: everything in the arena runs this much faster. */
+  speed?: number;
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
   const levels = opts.levels.length ? opts.levels : [];
   let index = Math.min(Math.max(opts.startIndex ?? 0, 0), Math.max(levels.length - 1, 0));
-  let arena = new Arena({ level: levels[index], superId: opts.superId, mode: 'solo' });
+  let speed = opts.speed ?? 1;
+  let arena = new Arena({ level: levels[index], superId: opts.superId, mode: 'solo', lives: opts.lives });
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
   let layout = { scale: 1, ox: 0, oy: 0 };
@@ -160,14 +166,45 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     ]);
   }
 
+  /** In-run speed toggle, so a slow level can be sped up without restarting. */
+  function cycleSpeed(): void {
+    const i = SPEED_CHOICES.indexOf(speed as (typeof SPEED_CHOICES)[number]);
+    speed = SPEED_CHOICES[(i + 1) % SPEED_CHOICES.length];
+    app.saveProfile((p) => (p.gameSpeed = speed));
+    fx.text(240, 300, `СКОРОСТЬ ×${speed}`, '#ffd24d');
+    sfx.play('ui');
+  }
+
   function togglePause(): void {
     paused = !paused;
     if (!paused) return clearPanel();
-    panel('ПАУЗА', '#4de2ff', ['Мышь или A/D — движение. Пробел — запуск и лазер. Shift — супер.'], [
+    showPausePanel();
+  }
+
+  function showPausePanel(): void {
+    panel(
+      'ПАУЗА',
+      '#4de2ff',
+      [
+        'Мышь или A/D — движение. Пробел — запуск и лазер. Shift — супер.',
+        `Скорость игры: ×${speed} — клавиша F переключает её и на ходу.`,
+      ],
+      [
       button('Продолжить', () => {
         paused = false;
         clearPanel();
       }, 'btn primary'),
+      ...SPEED_CHOICES.map((s) =>
+        button(
+          `×${s}`,
+          () => {
+            speed = s;
+            app.saveProfile((p) => (p.gameSpeed = s));
+            showPausePanel();
+          },
+          `btn small${speed === s ? ' primary' : ''}`,
+        ),
+      ),
       button('Начать заново', () => app.setScene((a) => soloScene(a, opts))),
       button('В меню', () => {
         bank();
@@ -180,6 +217,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     update(dt) {
       t += dt;
       if (app.input.wasPressed(['Escape']) && !finished && arena.state !== 'cleared') togglePause();
+      if (app.input.wasPressed(['KeyF'])) cycleSpeed();
       fx.update(dt);
       if (paused || finished) return;
 
@@ -188,7 +226,9 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       const input =
         arena.state === 'cleared' ? noInput() : app.input.read(SOLO_KEYS, clampPointer(arenaX));
 
-      stepper.step(dt, (sdt, first) => arena.update(sdt, edgeOnce(input, first)));
+      // Speed multiplier feeds the clock, not the physics: every timer, drop and
+      // bounce scales together, so the game stays exactly itself, just faster.
+      stepper.step(dt * speed, (sdt, first) => arena.update(sdt, edgeOnce(input, first)));
       const events = arena.drainEvents();
       fx.consume(events);
       sfx.consume(events, arena.combo);
@@ -212,7 +252,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       drawHud(ctx, arena, ARENA_W + GAP, 0, HUD_W, SCENE_H, {
         title: opts.title,
         accent: '#4de2ff',
-        subtitle: `${arena.level.name} · ${index + 1}/${levels.length}`,
+        subtitle: `${arena.level.name} · ${index + 1}/${levels.length}${speed > 1 ? ` · ×${speed}` : ''}`,
         fps: app.fps,
       });
       ctx.restore();

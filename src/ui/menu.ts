@@ -1,7 +1,13 @@
 import { App, type Scene } from '../app';
 import { CAMPAIGN_LEVELS, CAMPAIGN_SIZE, CHAOS_FROM, levelTier } from '../core/campaignLevels';
 import type { LevelData } from '../core/level';
-import { accountLevel, isSuperUnlocked, loadUserLevels } from '../core/storage';
+import {
+  accountLevel,
+  isSuperUnlocked,
+  loadUserLevels,
+  LIVES_CHOICES,
+  SPEED_CHOICES,
+} from '../core/storage';
 import { SUPER_LIST, SUPERS, type SuperId } from '../core/supers';
 import { Backdrop } from '../render/backdrop';
 import { soloScene } from '../game/campaign';
@@ -192,6 +198,52 @@ export function mainMenu(app: App): Scene {
             { class: 'hint' },
             `${levels.length} уровней${opts.startIndex ? `, старт с ${opts.startIndex + 1}-го` : ''}. Опыт копится внутри забега — каждый новый уровень мастерства даёт выбор из трёх усилений.`,
           ),
+          el(
+            'div',
+            { class: 'row', style: 'gap:26px;margin-top:18px;align-items:flex-start' },
+            el(
+              'div',
+              {},
+              el('h3', {}, 'Жизни'),
+              el(
+                'div',
+                { class: 'row', style: 'gap:6px' },
+                ...LIVES_CHOICES.map((n) =>
+                  button(
+                    n === 1 ? '1 — хардкор' : String(n),
+                    () => {
+                      app.saveProfile((p) => (p.lives = n));
+                      sfx.play('ui');
+                      render();
+                    },
+                    `btn small${app.profile.lives === n ? ' primary' : ''}`,
+                  ),
+                ),
+              ),
+            ),
+            el(
+              'div',
+              {},
+              el('h3', {}, 'Скорость игры'),
+              el(
+                'div',
+                { class: 'row', style: 'gap:6px' },
+                ...SPEED_CHOICES.map((s) =>
+                  button(
+                    `×${s}`,
+                    () => {
+                      app.saveProfile((p) => (p.gameSpeed = s));
+                      sfx.play('ui');
+                      render();
+                    },
+                    `btn small${app.profile.gameSpeed === s ? ' primary' : ''}`,
+                  ),
+                ),
+              ),
+              el('p', { class: 'hint', style: 'margin:6px 0 0' }, 'В игре переключается клавишей F'),
+            ),
+          ),
+
           el('h3', { style: 'margin-top:18px' }, 'Суперудар'),
           superPicker(chosen, (id) => {
             chosen = id;
@@ -211,6 +263,8 @@ export function mainMenu(app: App): Scene {
                     title,
                     startIndex: opts.startIndex ?? 0,
                     trackProgress: opts.campaign === true,
+                    lives: app.profile.lives,
+                    speed: app.profile.gameSpeed,
                   }),
                 ),
               'btn primary',
@@ -308,12 +362,24 @@ export function mainMenu(app: App): Scene {
                 const level = pool[levelIndex] ?? pool[0];
                 if (kind === 'duel') {
                   app.setScene((a) =>
-                    duelScene(a, { level, supers: [p1, p2], names: ['ИГРОК 1', 'ИГРОК 2'], target: 5 }),
+                    duelScene(a, {
+                      level,
+                      supers: [p1, p2],
+                      names: ['ИГРОК 1', 'ИГРОК 2'],
+                      target: 5,
+                      speed: app.profile.gameSpeed,
+                    }),
                   );
                 } else {
                   const levels = [level, ...pool.filter((l) => l !== level)];
                   app.setScene((a) =>
-                    versusScene(a, { levels, supers: [p1, p2], lives: 3, names: ['ИГРОК 1', 'ИГРОК 2'] }),
+                    versusScene(a, {
+                      levels,
+                      supers: [p1, p2],
+                      lives: app.profile.lives,
+                      names: ['ИГРОК 1', 'ИГРОК 2'],
+                      speed: app.profile.gameSpeed,
+                    }),
                   );
                 }
               },

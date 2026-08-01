@@ -22,6 +22,8 @@ export interface VersusOptions {
   supers: [SuperId, SuperId];
   lives: number;
   names: [string, string];
+  /** Simulation speed multiplier, shared by both fields. */
+  speed?: number;
 }
 
 interface Side {
@@ -148,7 +150,7 @@ export function versusScene(app: App, opts: VersusOptions): Scene {
       // A perk draft freezes both fields, so nobody loses tempo while choosing.
       const drafting = sides.some((s) => s.arena.state === 'levelup');
 
-      stepper.step(dt, (sdt, first) => {
+      stepper.step(dt * (opts.speed ?? 1), (sdt, first) => {
         for (let i = 0; i < 2; i++) {
           const a = sides[i].arena;
           if (drafting && a.state !== 'levelup') continue;
