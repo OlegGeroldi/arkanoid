@@ -34,6 +34,9 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   let layout = { scale: 1, ox: 0, oy: 0 };
   let paused = false;
   let finished = false;
+  /** True while the between-levels panel is on screen: it must be built once,
+   *  or rebuilding it every frame would swallow the click on its buttons. */
+  let panelOpen = false;
   let t = 0;
   const exit = opts.onExit ?? mainMenu;
 
@@ -48,6 +51,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   }
 
   function panel(title: string, tone: string, lines: string[], actions: HTMLElement[]): void {
+    panelOpen = true;
     app.overlay.classList.add('interactive');
     app.overlay.replaceChildren(
       el(
@@ -61,6 +65,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   }
 
   function clearPanel(): void {
+    panelOpen = false;
     app.overlay.replaceChildren();
     app.overlay.classList.remove('interactive');
   }
@@ -169,6 +174,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       stepper.step(dt, (sdt, first) => arena.update(sdt, edgeOnce(input, first)));
       fx.consume(arena.drainEvents());
 
+      if (panelOpen) return;
       if (arena.state === 'cleared') levelCleared();
       else if (arena.state === 'dead') dead();
     },
