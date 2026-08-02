@@ -29,6 +29,7 @@ import { BALL_TYPE_LIST } from '../core/balls';
 import { SKILL_LIST, SKILL_SLOTS } from '../core/skills';
 import { formatTime, summarise } from '../core/stats';
 import { hall } from '../core/hall';
+import { ALL_ENTRIES, type StoryEntry } from '../core/story';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -151,6 +152,7 @@ export function mainMenu(app: App): Scene {
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),
           modeCard('🛠', 'Редактор уровней', 'Рисуйте поля, тестируйте, экспортируйте', () => screenEditor()),
+          modeCard('📖', 'Хроника', `Открыто записей: ${app.profile.storySeen.length} из ${ALL_ENTRIES.length}`, () => screenStory()),
           modeCard('📊', 'Статистика', 'По каждому уровню и по всем игрокам', () => screenStats()),
           modeCard('🏆', 'Доска почёта', 'Общая для всех запущенных копий игры', () => screenHall()),
           modeCard('🔊', 'Звук и музыка', 'Громкость эффектов, свои треки из Suno', () => screenAudio()),
@@ -638,6 +640,60 @@ export function mainMenu(app: App): Scene {
       );
     };
     render();
+  }
+
+  // --------------------------------------------------------------- story --
+
+  /** The chronicle: every story beat the player has actually reached. Locked
+   *  ones are listed but not spoiled. */
+  function screenStory(): void {
+    const seen = new Set(app.profile.storySeen);
+    const groups: [string, StoryEntry['kind']][] = [
+      ['Пролог', 'prologue'],
+      ['Секторы', 'route'],
+      ['Смотрители', 'boss'],
+      ['Финал', 'finale'],
+    ];
+
+    show(
+      el(
+        'div',
+        { class: 'screen' },
+        el('h2', {}, 'Хроника'),
+        el(
+          'p',
+          { class: 'hint' },
+          `Записи открываются по ходу кампании: ${seen.size} из ${ALL_ENTRIES.length}.`,
+        ),
+        ...groups.flatMap(([title, kind]) => {
+          const entries = ALL_ENTRIES.filter((e) => e.kind === kind);
+          if (!entries.length) return [];
+          return [
+            el('h3', { style: 'margin-top:16px' }, title),
+            el(
+              'div',
+              { class: 'col', style: 'gap:10px' },
+              ...entries.map((entry) =>
+                seen.has(entry.id)
+                  ? el(
+                      'div',
+                      { class: 'card', style: 'cursor:default' },
+                      el('div', { class: 'title' }, entry.title),
+                      ...entry.text.split('\n\n').map((para) => el('p', { class: 'story' }, para)),
+                    )
+                  : el(
+                      'div',
+                      { class: 'card locked', style: 'cursor:default' },
+                      el('div', { class: 'title' }, '???'),
+                      el('div', { class: 'desc' }, 'Ещё не открыто'),
+                    ),
+              ),
+            ),
+          ];
+        }),
+        el('div', { class: 'row', style: 'margin-top:20px' }, button('Назад', screenMain, 'btn primary')),
+      ),
+    );
   }
 
   // ------------------------------------------------------------ statistics --

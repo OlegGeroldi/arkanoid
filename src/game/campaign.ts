@@ -18,6 +18,7 @@ import { baseStats, XP_RATE } from '../core/progression';
 import { formatTime, recordClear, recordDeath, timeBonus } from '../core/stats';
 import { hall } from '../core/hall';
 import { routeChoices, ROUTES, SEGMENT, segmentOf, type RouteDef, type RouteId } from '../core/routes';
+import { BOSS_DEFEAT, BOSS_INTRO, cycleLine, FINALE, PROLOGUE, ROUTE_LORE, type StoryEntry } from '../core/story';
 import { generateLevel } from '../core/levelGen';
 
 const HUD_W = 244;
@@ -101,6 +102,13 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   music.setScene('game');
   markReached();
 
+  // Prologue on a fresh campaign; a resumed run picks up mid-sentence.
+  if (opts.trackProgress && !resume && index === 0) {
+    storyPanel(PROLOGUE, '#4de2ff', clearPanel, cycle > 0 ? cycleLine(cycle) : undefined);
+  } else if (opts.trackProgress && bossOf(index)) {
+    announceBoss(index, clearPanel);
+  }
+
   function bank(): void {
     const earned = Math.round(arena.xpEarned);
     app.saveProfile((p) => {
@@ -157,6 +165,26 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     });
   }
 
+  /** Shows a story beat and files it in the chronicle. Narrative never blocks
+   *  play: the panel appears where the game already pauses. */
+  function storyPanel(entry: StoryEntry, tone: string, onClose: () => void, extra?: string): void {
+    app.saveProfile((p) => {
+      if (!p.storySeen.includes(entry.id)) p.storySeen.push(entry.id);
+    });
+    panelOpen = true;
+    app.overlay.classList.add('interactive');
+    app.overlay.replaceChildren(
+      el(
+        'div',
+        { class: 'screen narrow' },
+        el('h2', { style: `color:${tone}` }, entry.title),
+        ...entry.text.split('\n\n').map((para) => el('p', { class: 'story' }, para)),
+        extra ? el('p', { class: 'hint', style: `color:${tone}` }, extra) : null,
+        el('div', { class: 'row', style: 'margin-top:18px' }, button('Дальше', onClose, 'btn primary')),
+      ),
+    );
+  }
+
   function panel(title: string, tone: string, lines: string[], actions: HTMLElement[]): void {
     panelOpen = true;
     app.overlay.classList.add('interactive');
@@ -208,7 +236,8 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     fx = new ArenaFx();
     markReached();
     writeSave();
-    clearPanel();
+    if (opts.trackProgress && bossOf(index)) announceBoss(index, clearPanel);
+    else clearPanel();
   }
 
   /** After every segment the campaign forks: the next ten levels are rebuilt
@@ -257,7 +286,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     }
     fx.text(240, 300, route.name.toUpperCase(), route.color);
     sfx.play('levelup');
-    nextLevel();
+    storyPanel(ROUTE_LORE[route.id], route.color, () => nextLevel());
   }
 
   /** Books the level into the profile's stats and pays the time bonus. */
@@ -289,6 +318,17 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     });
   }
 
+  /** Which boss guards a level, if any — the level carries the id. */
+  function bossOf(i: number): keyof typeof BOSS_INTRO | null {
+    return (levels[i]?.boss as keyof typeof BOSS_INTRO | undefined) ?? null;
+  }
+
+  function announceBoss(i: number, onClose: () => void): void {
+    const id = bossOf(i);
+    if (!id) return onClose();
+    storyPanel(BOSS_INTRO[id], '#ff4d6d', onClose);
+  }
+
   function levelCleared(): void {
     const bonus = settleLevel();
     const isLast = index >= levels.length - 1 && !opts.endless;
@@ -302,10 +342,11 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       isLast ? 'ПОСЛЕДНИЙ РУБЕЖ ПРОЙДЕН' : `УРОВЕНЬ ${index + 1} ПРОЙДЕН`,
       '#3ddc84',
       [
+        bossOf(index) ? BOSS_DEFEAT[bossOf(index)!] : '',
         `Время: ${formatTime(arena.levelTime)} · бонус за скорость: +${bonus}`,
         `Счёт: ${arena.score} · опыт за забег: ${Math.round(arena.xpEarned)}`,
         `Уровень мастерства: ${arena.xpLevel} · жизней: ${arena.lives}`,
-      ],
+      ].filter(Boolean),
       isLast
         ? [button('Забрать награду', () => win(), 'btn primary')]
         : [
@@ -334,6 +375,14 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     });
     clearSave();
 
+    if (opts.trackProgress) {
+      storyPanel(FINALE, '#ffd24d', () => showVictory(nextCycle), cycleLine(nextCycle));
+      return;
+    }
+    showVictory(nextCycle);
+  }
+
+  function showVictory(nextCycle: number): void {
     panel(
       'ПОБЕДА',
       '#ffd24d',

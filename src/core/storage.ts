@@ -62,6 +62,8 @@ export interface Profile {
   skills: (SkillId | null)[];
   /** Per-level records: best time, best score, XP earned, clears and deaths. */
   levelStats: LevelStats;
+  /** Story entries unlocked so far, by id — the chronicle reads from this. */
+  storySeen: string[];
   /** The one autosaved campaign run, or null when there is nothing to continue. */
   save: RunSave | null;
   /** Completed New Game+ cycles. Account XP and skills carry over; the campaign
@@ -105,6 +107,7 @@ export function makeProfile(name: string, admin = false): Profile {
     gameSpeed: 1,
     skills: ['magnet', 'fireball'],
     levelStats: {},
+    storySeen: [],
     save: null,
     ngPlus: 0,
   };
@@ -179,6 +182,7 @@ function sanitizeProfile(raw: Partial<Profile>, fallbackName: string): Profile {
     : ['magnet', 'fireball'];
   while (p.skills.length < SKILL_SLOTS) p.skills.push(null);
   p.levelStats = p.levelStats && typeof p.levelStats === 'object' ? p.levelStats : {};
+  p.storySeen = Array.isArray(p.storySeen) ? p.storySeen.filter((id) => typeof id === 'string') : [];
   return p;
 }
 
