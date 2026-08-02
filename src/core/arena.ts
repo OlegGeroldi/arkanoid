@@ -6,7 +6,6 @@ import {
   BALL_SPEED_MAX,
   BRICK_H,
   BRICK_W,
-  COLS,
   COMBO_MAX,
   COMBO_WINDOW,
   ENERGY_MAX,
@@ -121,6 +120,8 @@ export interface ArenaOptions {
   superId?: SuperId;
   mode?: ArenaMode;
   lives?: number;
+  /** Field width in arena units. Co-op plays on a double-width field. */
+  width?: number;
   /** Carried between campaign levels. */
   stats?: RunStats;
   perksTaken?: Map<string, number>;
@@ -220,6 +221,11 @@ export class Arena {
   readonly mode: ArenaMode;
   readonly rng: Rng;
   readonly seed: number;
+  /** Playfield width and its brick columns. Solo uses the module constants;
+   *  co-op doubles both, so every position in here is measured against these
+   *  fields rather than ARENA_W/COLS directly. */
+  readonly width: number;
+  readonly cols: number;
 
   level: LevelData;
   bricks: Brick[] = [];
@@ -230,6 +236,13 @@ export class Arena {
   paddleW = PADDLE_W;
   paddleTargetW = PADDLE_W;
   shields = 0;
+
+  /** Co-op: a second paddle on the same field, driven by the second player.
+   *  Everything else — balls, lives, XP, super — stays shared. */
+  coop = false;
+  p2X = ARENA_W / 2 + 90;
+  p2W = PADDLE_W;
+  private input2: ArenaInput | null = null;
 
   balls: Ball[] = [];
   powerups: FallingPowerup[] = [];
@@ -287,6 +300,10 @@ export class Arena {
 
   constructor(opts: ArenaOptions) {
     this.mode = opts.mode ?? 'solo';
+    this.width = opts.width ?? ARENA_W;
+    this.cols = Math.round(this.width / BRICK_W);
+    this.paddleX = this.width / 2;
+    this.p2X = this.width / 2 + 90;
     this.seed = opts.seed ?? (Date.now() >>> 0);
     this.rng = new Rng(this.seed);
     this.superId = opts.superId ?? 'barrage';
@@ -308,10 +325,10 @@ export class Arena {
     this.level = level;
     this.boss = level.boss ? this.spawnBoss(BOSSES[level.boss]) : null;
     this.bossShots = [];
-    this.bricks = buildBricks(level);
-    this.grid = new Array(COLS * ROWS).fill(null);
-    for (const b of this.bricks) this.grid[b.row * COLS + b.col] = b;
-    this.remaining = breakableCount(level);
+    this.bricks = buildBricks(level, this.cols);
+    this.grid = new Array(this.cols * ROWS).fill(null);
+    for (const b of this.bricks) this.grid[b.row * this.cols + b.col] = b;
+    this.remaining = breakableCount(level, this.cols);
     this.powerups = [];
     this.lasers = [];
     this.balls = [];
@@ -326,7 +343,7 @@ export class Arena {
   private spawnBoss(def: BossDef): BossState {
     return {
       def,
-      x: ARENA_W / 2,
+      x: this.width / 2,
       y: GRID_TOP - 6,
       vx: def.speed,
       hp: def.hp,
@@ -357,8 +374,8 @@ export class Arena {
     if (boss.x < WALL + half) {
       boss.x = WALL + half;
       boss.vx = Math.abs(boss.vx);
-    } else if (boss.x > ARENA_W - WALL - half) {
-      boss.x = ARENA_W - WALL - half;
+    } else if (boss.x > this.width - WALL - half) {
+      boss.x = this.width - WALL - half;
       boss.vx = -Math.abs(boss.vx);
     }
 
@@ -474,15 +491,16 @@ export class Arena {
   }
 
   private cellAt(col: number, row: number): Brick | null {
-    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
-    const b = this.grid[row * COLS + col];
+    if (col < 0 || col >= this.cols || row < 0 || row >= ROWS) return null;
+    const b = this.grid[row * this.cols + col];
     return b && b.alive ? b : null;
   }
 
   // ---------------------------------------------------------------- update --
 
-  update(dt: number, input: ArenaInput): void {
+  update(dt: number, input: ArenaInput, input2?: ArenaInput): void {
     if (this.state === 'dead' || this.state === 'cleared') return;
+    this.input2 = input2 ?? null;
     this.time += dt;
     this.shake = Math.max(0, this.shake - dt * 3.2);
     this.flash = Math.max(0, this.flash - dt * 2.5);
@@ -512,8 +530,10 @@ export class Arena {
     this.tickSkills(dt);
     this.movePaddle(dt, input);
 
-    if (input.superPressed) this.fireSuper();
-    if (input.skill > 0) this.useSkill(input.skill);
+    // Either player may spend the shared super and the shared skill slots.
+    if (input.superPressed || input2?.superPressed) this.fireSuper();
+    const skillPressed = input.skill || input2?.skill || 0;
+    if (skillPressed > 0) this.useSkill(skillPressed);
     this.updateSuper(dt);
     this.updateFireballs(dt);
 
@@ -587,7 +607,7 @@ export class Arena {
     if (input.pointer !== null) {
       // The paddle tracks the mouse 1:1. Rate-limiting it here felt like input
       // lag, which is fatal in a game about being under the ball in time.
-      this.paddleX = this.timers.invert > 0 ? ARENA_W - input.pointer : input.pointer;
+      this.paddleX = this.timers.invert > 0 ? this.width - input.pointer : input.pointer;
     } else {
       let dir = 0;
       if (input.left) dir -= 1;
@@ -596,15 +616,33 @@ export class Arena {
     }
 
     const half = this.paddleW / 2;
-    this.paddleX = clamp(this.paddleX, WALL + half, ARENA_W - WALL - half);
+    this.paddleX = clamp(this.paddleX, WALL + half, this.width - WALL - half);
+
+    if (this.coop) this.moveSecondPaddle(dt);
 
     // Held balls ride along with the paddle.
     for (const b of this.balls) {
       if (b.held !== null) {
-        b.x = clamp(this.paddleX + b.held, WALL + b.r, ARENA_W - WALL - b.r);
+        b.x = clamp(this.paddleX + b.held, WALL + b.r, this.width - WALL - b.r);
         b.y = PADDLE_Y - b.r - 1;
       }
     }
+  }
+
+  /** Co-op second paddle: keys only, same width rules, shares the field. */
+  private moveSecondPaddle(dt: number): void {
+    const input = this.input2;
+    this.p2W += (this.paddleTargetW - this.p2W) * Math.min(1, dt * 9);
+    if (!input) return;
+
+    const speed = PADDLE_SPEED * this.stats.paddleSpeedMul * (this.timers.invert > 0 ? -1 : 1);
+    let dir = 0;
+    if (input.left) dir -= 1;
+    if (input.right) dir += 1;
+    this.p2X += dir * speed * dt;
+
+    const half = this.p2W / 2;
+    this.p2X = clamp(this.p2X, WALL + half, this.width - WALL - half);
   }
 
   // ----------------------------------------------------------------- balls --
@@ -739,8 +777,8 @@ export class Arena {
     if (ball.x - ball.r < WALL) {
       ball.x = WALL + ball.r;
       ball.vx = Math.abs(ball.vx);
-    } else if (ball.x + ball.r > ARENA_W - WALL) {
-      ball.x = ARENA_W - WALL - ball.r;
+    } else if (ball.x + ball.r > this.width - WALL) {
+      ball.x = this.width - WALL - ball.r;
       ball.vx = -Math.abs(ball.vx);
     }
     if (ball.y - ball.r < WALL) {
@@ -750,15 +788,21 @@ export class Arena {
   }
 
   private collidePaddle(ball: Ball): boolean {
+    if (this.bouncePaddle(ball, this.paddleX, this.paddleW, '#8be9ff')) return true;
+    if (this.coop && this.bouncePaddle(ball, this.p2X, this.p2W, '#ff5fa2')) return true;
+    return false;
+  }
+
+  private bouncePaddle(ball: Ball, paddleX: number, paddleW: number, sparkColor: string): boolean {
     if (ball.vy <= 0) return false;
-    const half = this.paddleW / 2;
-    const left = this.paddleX - half;
+    const half = paddleW / 2;
+    const left = paddleX - half;
     const top = PADDLE_Y;
     if (ball.y + ball.r < top || ball.y - ball.r > top + PADDLE_H) return false;
-    if (ball.x + ball.r < left || ball.x - ball.r > left + this.paddleW) return false;
+    if (ball.x + ball.r < left || ball.x - ball.r > left + paddleW) return false;
 
     ball.y = top - ball.r;
-    let off = clamp((ball.x - this.paddleX) / half, -1, 1);
+    let off = clamp((ball.x - paddleX) / half, -1, 1);
     // A perfectly centred hit would send the ball straight up forever; nudge it
     // so a vertical corridor can never turn into a stalemate.
     if (Math.abs(off) < 0.05) off += this.rng.range(-0.09, 0.09);
@@ -769,7 +813,7 @@ export class Arena {
       ball.held = clamp(ball.x - this.paddleX, -half, half);
     }
     // Losing the ball ends the combo, but so does a lazy rally: bricks pay, not bounces.
-    this.events.push({ t: 'hit', x: ball.x, y: top, color: '#8be9ff' });
+    this.events.push({ t: 'hit', x: ball.x, y: top, color: sparkColor });
     return true;
   }
 
@@ -1016,11 +1060,12 @@ export class Arena {
         p.x += clamp(dx, -1, 1) * magnet * 130 * dt;
       }
 
+      const inRow = p.y + POWERUP_H >= PADDLE_Y && p.y <= PADDLE_Y + PADDLE_H;
       const caught =
-        p.y + POWERUP_H >= PADDLE_Y &&
-        p.y <= PADDLE_Y + PADDLE_H &&
-        p.x + POWERUP_W >= this.paddleX - half &&
-        p.x <= this.paddleX + half;
+        inRow &&
+        ((p.x + POWERUP_W >= this.paddleX - half && p.x <= this.paddleX + half) ||
+          // In co-op either paddle may catch the capsule.
+          (this.coop && p.x + POWERUP_W >= this.p2X - this.p2W / 2 && p.x <= this.p2X + this.p2W / 2));
 
       if (caught) {
         this.collect(p.id, p.x + POWERUP_W / 2, p.y);
@@ -1155,13 +1200,13 @@ export class Arena {
       if (this.droneTick <= 0) {
         this.droneTick = rank >= 2 ? 0.28 : 0.55;
         this.lasers.push({ x: this.paddleX, y: PADDLE_Y - 24, vy: -LASER_SPEED });
-        if (rank >= 3) this.lasers.push({ x: ARENA_W - this.paddleX, y: PADDLE_Y - 24, vy: -LASER_SPEED });
+        if (rank >= 3) this.lasers.push({ x: this.width - this.paddleX, y: PADDLE_Y - 24, vy: -LASER_SPEED });
       }
     }
 
     // Ghost paddle mirrors the player and can rescue a ball on the far side.
     if (this.timers.ghost > 0) {
-      const gx = ARENA_W - this.paddleX;
+      const gx = this.width - this.paddleX;
       const half = this.paddleW / 2;
       for (const ball of this.balls) {
         if (ball.held !== null || ball.vy <= 0) continue;
@@ -1195,7 +1240,7 @@ export class Arena {
           // Rank III is the only thing in the game that breaks indestructible blocks.
           if (f.rank >= 3) {
             brick.alive = false;
-            this.grid[brick.row * COLS + brick.col] = null;
+            this.grid[brick.row * this.cols + brick.col] = null;
             this.events.push({ t: 'brick', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: '#ffffff', big: true });
             this.shake = Math.min(1, this.shake + 0.3);
           }
@@ -1228,7 +1273,7 @@ export class Arena {
       case 'teleport': {
         const target = this.balls.reduce<Ball | null>((m, b) => (!m || b.y > m.y ? b : m), null);
         if (target) {
-          this.paddleX = clamp(target.x, WALL + this.paddleW / 2, ARENA_W - WALL - this.paddleW / 2);
+          this.paddleX = clamp(target.x, WALL + this.paddleW / 2, this.width - WALL - this.paddleW / 2);
           if (rank >= 2) target.baseSpeed = Math.max(120, target.baseSpeed * 0.85);
           if (rank >= 3) {
             target.vx = 0;
@@ -1282,7 +1327,7 @@ export class Arena {
           this.powerups.push({
             id: def2.id,
             def: def2,
-            x: this.rng.range(WALL, ARENA_W - WALL - POWERUP_W),
+            x: this.rng.range(WALL, this.width - WALL - POWERUP_W),
             y: -this.rng.range(0, 160),
             vy: POWERUP_FALL,
             spin: this.rng.range(0, 6.28),
@@ -1310,7 +1355,7 @@ export class Arena {
     this.energy = 0;
     this.flash = 1;
     this.shake = 1;
-    this.active = { id: this.superId, t: def.duration, tick: 0, x: ARENA_W / 2, y: GRID_TOP + 60 };
+    this.active = { id: this.superId, t: def.duration, tick: 0, x: this.width / 2, y: GRID_TOP + 60 };
     this.events.push({ t: 'super', id: this.superId });
 
     switch (this.superId) {
@@ -1323,7 +1368,7 @@ export class Arena {
         // neighbours through the grid keeps this linear — comparing every brick
         // against every other one used to stall the game once garbage rows had
         // piled hundreds of them up.
-        let best = { x: ARENA_W / 2, y: GRID_TOP + 80, n: -1 };
+        let best = { x: this.width / 2, y: GRID_TOP + 80, n: -1 };
         for (const b of this.bricks) {
           if (!b.alive) continue;
           let n = 0;
@@ -1359,7 +1404,7 @@ export class Arena {
       const half = this.paddleW / 2;
       const x = this.paddleX + this.rng.range(-half, half);
       this.lasers.push({ x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
-      this.lasers.push({ x: ARENA_W - x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
+      this.lasers.push({ x: this.width - x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
     }
 
     if (a.id === 'singularity' && a.tick <= 0) {
@@ -1374,7 +1419,7 @@ export class Arena {
           // A black hole does not care how sturdy a block claims to be. This is
           // the answer to regenerators sealed inside indestructible pockets.
           b.alive = false;
-          this.grid[b.row * COLS + b.col] = null;
+          this.grid[b.row * this.cols + b.col] = null;
           this.events.push({ t: 'brick', x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, color: '#b06bff', big: true });
         } else {
           this.damageBrick(b, 1);
@@ -1403,7 +1448,7 @@ export class Arena {
     const sorted = this.bricks.filter((b) => b.alive).sort((a, b) => b.row - a.row);
     let crushed = false;
     for (const b of sorted) {
-      this.grid[b.row * COLS + b.col] = null;
+      this.grid[b.row * this.cols + b.col] = null;
       if (b.row + 1 >= ROWS) {
         b.alive = false;
         if (b.kind.hp > 0) this.remaining--;
@@ -1412,10 +1457,10 @@ export class Arena {
       }
       b.row += 1;
       b.y += BRICK_H;
-      this.grid[b.row * COLS + b.col] = b;
+      this.grid[b.row * this.cols + b.col] = b;
     }
 
-    for (let c = 0; c < COLS; c++) {
+    for (let c = 0; c < this.cols; c++) {
       if (this.rng.chance(0.12)) continue;
       const kind = BRICK_KINDS.b;
       const brick: Brick = {

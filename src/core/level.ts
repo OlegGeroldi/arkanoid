@@ -51,9 +51,9 @@ export function normalizeLevel(raw: unknown, fallbackId = 'custom'): LevelData |
 }
 
 /** Bricks that can actually be destroyed — a level with none of them is unwinnable. */
-export function breakableCount(level: LevelData): number {
+export function breakableCount(level: LevelData, cols = COLS): number {
   let n = 0;
-  for (const row of level.rows) {
+  for (const row of widenRows(level.rows, cols)) {
     for (const ch of row) {
       if (isBrickCode(ch) && BRICK_KINDS[ch].hp > 0) n++;
     }
@@ -61,11 +61,29 @@ export function breakableCount(level: LevelData): number {
   return n;
 }
 
-export function buildBricks(level: LevelData): Brick[] {
+/** Widens a 12-column level to `cols` by mirroring it outward, so a co-op field
+ *  reads as one deliberate design rather than two levels glued together. */
+export function widenRows(rows: string[], cols: number): string[] {
+  if (cols <= COLS) return rows;
+  return rows.map((row) => {
+    let out = '';
+    for (let c = 0; c < cols; c++) {
+      // Fold the target column back into the source, alternating direction so
+      // each repeat is a mirror of the one before it.
+      const block = Math.floor(c / COLS);
+      const inner = c % COLS;
+      out += row[block % 2 === 0 ? inner : COLS - 1 - inner] ?? EMPTY;
+    }
+    return out;
+  });
+}
+
+export function buildBricks(level: LevelData, cols = COLS): Brick[] {
   const out: Brick[] = [];
+  const rows = widenRows(level.rows, cols);
   for (let r = 0; r < ROWS; r++) {
-    const row = level.rows[r] ?? '';
-    for (let c = 0; c < COLS; c++) {
+    const row = rows[r] ?? '';
+    for (let c = 0; c < cols; c++) {
       const ch = row[c];
       if (!ch || !isBrickCode(ch)) continue;
       const kind = BRICK_KINDS[ch];

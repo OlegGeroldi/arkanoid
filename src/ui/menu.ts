@@ -20,6 +20,7 @@ import { Backdrop } from '../render/backdrop';
 import { soloScene } from '../game/campaign';
 import { versusScene } from '../game/versus';
 import { duelScene } from '../game/duel';
+import { coopScene } from '../game/coop';
 import { editorScene } from '../editor/editor';
 import { button, el } from './dom';
 import { music } from '../audio/music';
@@ -131,6 +132,17 @@ export function mainMenu(app: App): Scene {
             'Свои уровни',
             userLevels.length ? `${userLevels.length} уровней в вашей библиотеке` : 'Пока пусто — создайте в редакторе',
             () => (userLevels.length ? screenSolo(userLevels, 'Свои уровни') : screenEditor()),
+          ),
+          modeCard('🤝', 'Кооп на двоих', 'Одно поле вдвое шире, две ракетки, общие мячи и жизни', () =>
+            app.setScene((a) =>
+              coopScene(a, {
+                levels: a.campaignLevels(),
+                superId: a.profile.favouriteSuper,
+                lives: a.profile.lives,
+                speed: a.profile.gameSpeed,
+                ngPlus: a.profile.ngPlus,
+              }),
+            ),
           ),
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),

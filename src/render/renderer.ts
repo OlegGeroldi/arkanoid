@@ -1,6 +1,5 @@
 import {
   ARENA_H,
-  ARENA_W,
   BRICK_H,
   BRICK_W,
   ENERGY_MAX,
@@ -83,13 +82,13 @@ function drawBackground(ctx: CanvasRenderingContext2D, arena: Arena, t: number):
   g.addColorStop(0.55, '#0a0f1f');
   g.addColorStop(1, '#070a16');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+  ctx.fillRect(0, 0, arena.width, ARENA_H);
 
   ctx.save();
   ctx.globalAlpha = 0.16;
   ctx.strokeStyle = '#2b3d6b';
   ctx.lineWidth = 1;
-  for (let x = 0; x <= ARENA_W; x += BRICK_W) {
+  for (let x = 0; x <= arena.width; x += BRICK_W) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, ARENA_H);
@@ -98,7 +97,7 @@ function drawBackground(ctx: CanvasRenderingContext2D, arena: Arena, t: number):
   for (let y = GRID_TOP; y <= ARENA_H; y += BRICK_H * 2) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(ARENA_W, y);
+    ctx.lineTo(arena.width, y);
     ctx.stroke();
   }
   ctx.restore();
@@ -110,21 +109,21 @@ function drawBackground(ctx: CanvasRenderingContext2D, arena: Arena, t: number):
   sg.addColorStop(0.5, 'rgba(77,226,255,0.045)');
   sg.addColorStop(1, 'rgba(77,226,255,0)');
   ctx.fillStyle = sg;
-  ctx.fillRect(0, sweep - 60, ARENA_W, 120);
+  ctx.fillRect(0, sweep - 60, arena.width, 120);
 
   // Walls
   ctx.fillStyle = '#16203c';
   ctx.fillRect(0, 0, WALL, ARENA_H);
-  ctx.fillRect(ARENA_W - WALL, 0, WALL, ARENA_H);
-  ctx.fillRect(0, 0, ARENA_W, WALL);
+  ctx.fillRect(arena.width - WALL, 0, WALL, ARENA_H);
+  ctx.fillRect(0, 0, arena.width, WALL);
   ctx.fillStyle = 'rgba(77,226,255,0.35)';
   ctx.fillRect(WALL - 2, 0, 2, ARENA_H);
-  ctx.fillRect(ARENA_W - WALL, 0, 2, ARENA_H);
-  ctx.fillRect(0, WALL - 2, ARENA_W, 2);
+  ctx.fillRect(arena.width - WALL, 0, 2, ARENA_H);
+  ctx.fillRect(0, WALL - 2, arena.width, 2);
 
   if (arena.flash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${arena.flash * 0.25})`;
-    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.fillRect(0, 0, arena.width, ARENA_H);
   }
 }
 
@@ -197,11 +196,22 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
 }
 
 function drawPaddle(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void {
-  const w = arena.paddleW;
-  const x = arena.paddleX - w / 2;
   const hot = arena.timers.laser > 0 || arena.stats.laserAlways;
   const color = arena.timers.invert > 0 ? '#ff4d6d' : hot ? '#ff9a4d' : '#4de2ff';
 
+  // Co-op partner first, so the first player's paddle stays on top when they overlap.
+  if (arena.coop) {
+    const w2 = arena.p2W;
+    const x2 = arena.p2X - w2 / 2;
+    neonRect(ctx, x2, PADDLE_Y, w2, PADDLE_H, withAlpha('#ff5fa2', 0.9), 6, 16);
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillRect(x2 + 6, PADDLE_Y + 2.5, w2 - 12, 2);
+    ctx.restore();
+  }
+
+  const w = arena.paddleW;
+  const x = arena.paddleX - w / 2;
   neonRect(ctx, x, PADDLE_Y, w, PADDLE_H, withAlpha(color, 0.9), 6, 16);
   ctx.save();
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
@@ -322,7 +332,7 @@ function drawSkillEffects(ctx: CanvasRenderingContext2D, arena: Arena, t: number
   }
 
   if (arena.timers.ghost > 0) {
-    const gx = ARENA_W - arena.paddleX;
+    const gx = arena.width - arena.paddleX;
     ctx.save();
     ctx.globalAlpha = 0.45 + Math.sin(t * 6) * 0.1;
     neonRect(ctx, gx - arena.paddleW / 2, PADDLE_Y, arena.paddleW, PADDLE_H, '#7c6cff', 6, 14);
@@ -347,7 +357,7 @@ function drawSkillEffects(ctx: CanvasRenderingContext2D, arena: Arena, t: number
     g.addColorStop(0, 'rgba(61,220,132,0)');
     g.addColorStop(1, 'rgba(61,220,132,0.85)');
     ctx.fillStyle = g;
-    ctx.fillRect(0, ARENA_H - 26, ARENA_W, 26);
+    ctx.fillRect(0, ARENA_H - 26, arena.width, 26);
     ctx.restore();
   }
 
@@ -357,7 +367,7 @@ function drawSkillEffects(ctx: CanvasRenderingContext2D, arena: Arena, t: number
     ctx.fillStyle = '#ff7a3d';
     ctx.font = `800 12px ${FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText(`МОЛОТ ×${arena.hammerHits}`, ARENA_W / 2, PADDLE_Y - 30);
+    ctx.fillText(`МОЛОТ ×${arena.hammerHits}`, arena.width / 2, PADDLE_Y - 30);
     ctx.restore();
   }
 }
@@ -407,15 +417,15 @@ function drawBoss(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void 
   // HP bar across the top of the field.
   ctx.save();
   ctx.fillStyle = 'rgba(4,7,15,0.7)';
-  ctx.fillRect(WALL, 14, ARENA_W - WALL * 2, 18);
-  bar(ctx, WALL + 4, 19, ARENA_W - WALL * 2 - 8, 8, boss.hp / boss.maxHp, def.color, boss.phase === 3);
+  ctx.fillRect(WALL, 14, arena.width - WALL * 2, 18);
+  bar(ctx, WALL + 4, 19, arena.width - WALL * 2 - 8, 8, boss.hp / boss.maxHp, def.color, boss.phase === 3);
   ctx.fillStyle = '#ffffff';
   ctx.font = `800 10px ${FONT}`;
   ctx.textAlign = 'left';
   ctx.fillText(def.name.toUpperCase(), WALL + 6, 15);
   ctx.textAlign = 'right';
   ctx.fillStyle = shielded ? '#ffd24d' : withAlpha(def.color, 0.9);
-  ctx.fillText(shielded ? 'ЩИТ АКТИВЕН' : `${Math.ceil(boss.hp)} / ${boss.maxHp}`, ARENA_W - WALL - 6, 15);
+  ctx.fillText(shielded ? 'ЩИТ АКТИВЕН' : `${Math.ceil(boss.hp)} / ${boss.maxHp}`, arena.width - WALL - 6, 15);
   ctx.textAlign = 'left';
   ctx.restore();
 
@@ -443,7 +453,7 @@ function drawShield(ctx: CanvasRenderingContext2D, arena: Arena): void {
   ctx.setLineDash([12, 8]);
   ctx.beginPath();
   ctx.moveTo(WALL, y);
-  ctx.lineTo(ARENA_W - WALL, y);
+  ctx.lineTo(arena.width - WALL, y);
   ctx.stroke();
   ctx.restore();
 }
@@ -480,7 +490,7 @@ function drawSuperVisuals(ctx: CanvasRenderingContext2D, arena: Arena, t: number
     ctx.save();
     ctx.globalAlpha = 0.12 + Math.sin(t * 6) * 0.03;
     ctx.fillStyle = def.color;
-    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.fillRect(0, 0, arena.width, ARENA_H);
     ctx.restore();
   }
 }
@@ -492,7 +502,7 @@ function drawHazards(ctx: CanvasRenderingContext2D, arena: Arena, t: number): vo
     for (let i = 0; i < 26; i++) {
       const y = ((i * 71 + t * 60) % ARENA_H) | 0;
       ctx.fillStyle = i % 2 ? 'rgba(120,140,190,0.35)' : 'rgba(20,26,50,0.55)';
-      ctx.fillRect(0, y, ARENA_W, 9);
+      ctx.fillRect(0, y, arena.width, 9);
     }
     ctx.restore();
   }
@@ -500,7 +510,7 @@ function drawHazards(ctx: CanvasRenderingContext2D, arena: Arena, t: number): vo
     ctx.save();
     ctx.strokeStyle = 'rgba(255,77,109,0.6)';
     ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, ARENA_W - 4, ARENA_H - 4);
+    ctx.strokeRect(2, 2, arena.width - 4, ARENA_H - 4);
     ctx.restore();
   }
 }
@@ -511,26 +521,26 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.font = `600 15px ${FONT}`;
-    ctx.fillText('Огонь — запуск мяча', ARENA_W / 2, PADDLE_Y - 46);
+    ctx.fillText('Огонь — запуск мяча', arena.width / 2, PADDLE_Y - 46);
     ctx.restore();
   }
 
   if (arena.state === 'levelup') {
     ctx.save();
     ctx.fillStyle = 'rgba(4,7,15,0.82)';
-    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.fillRect(0, 0, arena.width, ARENA_H);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd24d';
     ctx.font = `800 26px ${FONT}`;
-    ctx.fillText(`УРОВЕНЬ ${arena.xpLevel}`, ARENA_W / 2, 150);
+    ctx.fillText(`УРОВЕНЬ ${arena.xpLevel}`, arena.width / 2, 150);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = `500 13px ${FONT}`;
-    ctx.fillText('Выберите усиление', ARENA_W / 2, 174);
+    ctx.fillText('Выберите усиление', arena.width / 2, 174);
 
     const drawCard = (i: number, icon: string, title: string, desc: string, accent: string): void => {
       const y = 210 + i * 108;
       const x = 40;
-      const w = ARENA_W - 80;
+      const w = arena.width - 80;
       ctx.fillStyle = 'rgba(20,28,54,0.95)';
       ctx.strokeStyle = withAlpha(accent, 0.5);
       ctx.lineWidth = 1.5;
@@ -573,26 +583,26 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = `500 12px ${FONT}`;
-    ctx.fillText(`Авто-выбор через ${arena.draftTimer.toFixed(1)} с`, ARENA_W / 2, ARENA_H - 60);
+    ctx.fillText(`Авто-выбор через ${arena.draftTimer.toFixed(1)} с`, arena.width / 2, ARENA_H - 60);
     ctx.restore();
   }
 
   if (arena.state === 'spec') {
     ctx.save();
     ctx.fillStyle = 'rgba(4,7,15,0.86)';
-    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.fillRect(0, 0, arena.width, ARENA_H);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd24d';
     ctx.font = `800 24px ${FONT}`;
-    ctx.fillText('РАЗВИЛКА ПУТИ', ARENA_W / 2, 140);
+    ctx.fillText('РАЗВИЛКА ПУТИ', arena.width / 2, 140);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = `500 13px ${FONT}`;
-    ctx.fillText('Выберите специализацию на весь забег', ARENA_W / 2, 164);
+    ctx.fillText('Выберите специализацию на весь забег', arena.width / 2, 164);
 
     SPEC_LIST.forEach((spec, i) => {
       const y = 200 + i * 112;
       const x = 34;
-      const w = ARENA_W - 68;
+      const w = arena.width - 68;
       ctx.fillStyle = 'rgba(20,28,54,0.95)';
       ctx.strokeStyle = withAlpha(spec.color, 0.7);
       ctx.lineWidth = 2;
@@ -621,18 +631,18 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = `500 12px ${FONT}`;
-    ctx.fillText(`Случайный выбор через ${arena.draftTimer.toFixed(1)} с`, ARENA_W / 2, ARENA_H - 54);
+    ctx.fillText(`Случайный выбор через ${arena.draftTimer.toFixed(1)} с`, arena.width / 2, ARENA_H - 54);
     ctx.restore();
   }
 
   if (arena.state === 'dead') {
     ctx.save();
     ctx.fillStyle = 'rgba(30,4,12,0.72)';
-    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.fillRect(0, 0, arena.width, ARENA_H);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ff4d6d';
     ctx.font = `800 34px ${FONT}`;
-    ctx.fillText('ПОРАЖЕНИЕ', ARENA_W / 2, ARENA_H / 2);
+    ctx.fillText('ПОРАЖЕНИЕ', arena.width / 2, ARENA_H / 2);
     ctx.restore();
   }
 }
