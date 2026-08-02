@@ -23,6 +23,7 @@ import type { LevelData } from '../core/level';
 import { avoidShallow, clamp, setSpeed } from '../core/math';
 import { Rng } from '../core/rng';
 import { SUPERS, type SuperId } from '../core/supers';
+import { DEBUFFS, DEBUFF_LIST, type DebuffId } from '../core/debuffs';
 import { ArenaFx } from '../render/fx';
 import { bar, FONT, neonRect } from '../render/renderer';
 import { P1_KEYS, P2_KEYS, type Bindings } from './input';
@@ -64,6 +65,12 @@ interface Fighter {
   wideT: number;
   activeT: number;
   fx: ArenaFx;
+  /** Sabotage this fighter is suffering right now. */
+  debuffs: Partial<Record<DebuffId, number>>;
+  /** Ball charge carried while this fighter owns the ball. */
+  armed: DebuffId | null;
+  armedT: number;
+  charge: number;
 }
 
 interface DuelBall {
@@ -85,6 +92,16 @@ interface DuelLaser {
   owner: 0 | 1;
 }
 
+/** Capsules only exist in duel to carry sabotage: they drift toward whoever
+ *  broke the brick, so collecting one is a reward for pressure. */
+interface DuelCapsule {
+  x: number;
+  y: number;
+  vy: number;
+  debuff: DebuffId;
+  owner: 0 | 1;
+}
+
 /** Head-to-head arkanoid: one shared field, one ball, a paddle at each end.
  *  Miss the ball and the other player scores. */
 export function duelScene(app: App, opts: DuelOptions): Scene {
@@ -92,6 +109,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
   const stepper = new FixedStepper();
   const bricks: Brick[] = [];
   const lasers: DuelLaser[] = [];
+  const capsules: DuelCapsule[] = [];
   // Assigned by serve() below, before the first update.
   let ball!: DuelBall;
   let over = false;
@@ -116,6 +134,10 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
       wideT: 0,
       activeT: 0,
       fx: new ArenaFx(),
+      debuffs: {},
+      armed: null,
+      armedT: 0,
+      charge: 0,
     },
     {
       index: 1,
@@ -132,6 +154,10 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
       wideT: 0,
       activeT: 0,
       fx: new ArenaFx(),
+      debuffs: {},
+      armed: null,
+      armedT: 0,
+      charge: 0,
     },
   ];
 
@@ -216,6 +242,26 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
     // Bricks feed super energy; only goals move the score.
     brick.alive = false;
     f.fx.burst(brick.x + BRICK_W / 2, brick.y + BRICK_H / 2, brick.kind.color, 14);
+
+    // Sabotage capsules fall toward the player who earned them.
+    if (rng.chance(0.16)) {
+      capsules.push({
+        x: brick.x + BRICK_W / 2 - 13,
+        y: brick.y,
+        vy: by === 0 ? 120 : -120,
+        debuff: rng.pick(DEBUFF_LIST).id,
+        owner: by,
+      });
+    }
+
+    // A charged ball ships its effect to the other side every few bricks.
+    if (f.armed) {
+      f.charge++;
+      if (f.charge >= DEBUFFS[f.armed].perCharge) {
+        f.charge = 0;
+        applyDebuff(fighters[1 - by], f.armed, f);
+      }
+    }
     if (brick.kind.explodes) {
       f.fx.ring(brick.x + BRICK_W / 2, brick.y + BRICK_H / 2, 60, '#ff9a4d');
       for (const o of bricks) {
@@ -263,13 +309,17 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
   }
 
   function movePaddle(f: Fighter, dt: number, left: boolean, right: boolean): void {
-    const targetW = PADDLE_W * (f.wideT > 0 ? 1.6 : 1);
+    const brittle = f.debuffs.brittle ? 26 : 0;
+    const targetW = Math.max(38, PADDLE_W * (f.wideT > 0 ? 1.6 : 1) - brittle);
     f.w += (targetW - f.w) * Math.min(1, dt * 8);
-    const speed = PADDLE_SPEED * (f.stunT > 0 ? 0.35 : 1);
+
+    const frost = f.debuffs.frost ? 0.45 : 1;
+    const speed = PADDLE_SPEED * (f.stunT > 0 ? 0.35 : 1) * frost;
+    const mirror = f.debuffs.mirror ? -1 : 1;
     let dir = 0;
     if (left) dir -= 1;
     if (right) dir += 1;
-    f.x = clamp(f.x + dir * speed * dt, WALL + f.w / 2, ARENA_W - WALL - f.w / 2);
+    f.x = clamp(f.x + dir * mirror * speed * dt, WALL + f.w / 2, ARENA_W - WALL - f.w / 2);
   }
 
   function bounceOffPaddle(f: Fighter): void {
@@ -401,6 +451,51 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
     }
   }
 
+  function updateCapsules(dt: number): void {
+    for (let i = capsules.length - 1; i >= 0; i--) {
+      const c = capsules[i];
+      c.y += c.vy * dt;
+      if (c.y < -20 || c.y > ARENA_H + 20) {
+        capsules.splice(i, 1);
+        continue;
+      }
+      const f = fighters[c.owner];
+      const caught =
+        Math.abs(c.x + 13 - f.x) <= f.w / 2 + 13 && Math.abs(c.y - f.y) <= PADDLE_H + 10;
+      if (caught) {
+        f.armed = c.debuff;
+        f.armedT = DEBUFFS[c.debuff].ballDuration;
+        f.charge = 0;
+        f.fx.text(ARENA_W / 2, ARENA_H / 2 + (c.owner === 0 ? 60 : -60), DEBUFFS[c.debuff].name, DEBUFFS[c.debuff].color);
+        sfx.play('powerup');
+        capsules.splice(i, 1);
+      }
+    }
+  }
+
+  /** Sabotage landing on a fighter. Duel has no bricks to push, so the effects
+   *  target the paddle, the ball and the super meter instead. */
+  function applyDebuff(target: Fighter, id: DebuffId, from: Fighter): void {
+    const def = DEBUFFS[id];
+    switch (id) {
+      case 'steel':
+      case 'quake':
+        // No field to bury: shove the ball at the victim instead.
+        ball.speed = Math.min(BALL_SPEED_MAX, ball.speed * 1.25);
+        ball.vy = target.index === 0 ? Math.abs(ball.vy) : -Math.abs(ball.vy);
+        break;
+      case 'drain':
+        from.energy = Math.min(ENERGY_MAX, from.energy + Math.min(45, target.energy));
+        target.energy = Math.max(0, target.energy - 45);
+        break;
+      default:
+        target.debuffs[id] = Math.max(target.debuffs[id] ?? 0, def.duration);
+        break;
+    }
+    target.fx.text(ARENA_W / 2, target.y + (target.index === 0 ? -40 : 40), `${def.icon} ${def.name}`, def.color);
+    sfx.play('garbage');
+  }
+
   function updateLasers(dt: number): void {
     for (let i = lasers.length - 1; i >= 0; i--) {
       const l = lasers[i];
@@ -451,11 +546,24 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
             f.stunT = Math.max(0, f.stunT - sdt);
             f.wideT = Math.max(0, f.wideT - sdt);
             f.activeT = Math.max(0, f.activeT - sdt);
+            if (f.armedT > 0) {
+              f.armedT = Math.max(0, f.armedT - sdt);
+              if (f.armedT === 0) {
+                f.armed = null;
+                f.charge = 0;
+              }
+            }
+            for (const key of Object.keys(f.debuffs) as DebuffId[]) {
+              const left = (f.debuffs[key] ?? 0) - sdt;
+              if (left <= 0) delete f.debuffs[key];
+              else f.debuffs[key] = left;
+            }
             movePaddle(f, sdt, wants[f.index].left, wants[f.index].right);
           }
           for (const b of bricks) if (b.flash > 0) b.flash = Math.max(0, b.flash - sdt * 4);
           updateBall(sdt);
           updateLasers(sdt);
+          updateCapsules(sdt);
         }
         if (first) {
           for (const f of fighters) if (wants[f.index].superPressed) fireSuper(f);
@@ -527,8 +635,19 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
         ctx.fillRect(l.x - 1.5, l.y - 8, 3, 16);
       }
 
+      for (const c of capsules) {
+        const def = DEBUFFS[c.debuff];
+        neonRect(ctx, c.x, c.y - 6, 26, 13, def.color, 4, 12);
+        ctx.fillStyle = '#04070f';
+        ctx.font = `700 10px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.fillText(def.letter, c.x + 13, c.y + 1.5);
+        ctx.textAlign = 'left';
+      }
+
       // Ball
-      const color = ball.fireT > 0 ? '#ffb24d' : '#ffffff';
+      const carrier = fighters[ball.owner];
+      const color = carrier.armed ? DEBUFFS[carrier.armed].color : ball.fireT > 0 ? '#ffb24d' : '#ffffff';
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ball.trail.forEach((p, i) => {
@@ -566,6 +685,16 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
         ctx.fillText(f.name, WALL + 34, y + 5);
         ctx.globalAlpha = 1;
         bar(ctx, ARENA_W - 160, y, 130, 8, f.energy / ENERGY_MAX, SUPERS[f.superId].color, f.energy >= ENERGY_MAX);
+
+        // What this fighter is carrying and what is being done to them.
+        const notes: string[] = [];
+        if (f.armed) notes.push(`${DEBUFFS[f.armed].icon}${f.charge}/${DEBUFFS[f.armed].perCharge}`);
+        for (const key of Object.keys(f.debuffs) as DebuffId[]) notes.push(DEBUFFS[key].icon);
+        if (notes.length) {
+          ctx.font = `700 11px ${FONT}`;
+          ctx.fillStyle = f.armed ? DEBUFFS[f.armed].color : '#ff4d6d';
+          ctx.fillText(notes.join(' '), WALL + 120, y + 5);
+        }
       }
       ctx.textAlign = 'center';
 

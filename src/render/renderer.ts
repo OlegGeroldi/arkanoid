@@ -16,6 +16,7 @@ import { SUPERS } from '../core/supers';
 import { SPEC_LIST, SPECS } from '../core/specialisation';
 import { SKILLS, skillCooldown } from '../core/skills';
 import { formatTime } from '../core/stats';
+import { DEBUFFS } from '../core/debuffs';
 import type { ArenaFx } from './fx';
 import { clamp } from '../core/math';
 
@@ -249,8 +250,17 @@ function drawBalls(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void
       trail = color;
       glow = fire ? 26 : 18;
     }
+    // A sabotage charge overrides the elemental colour: it is the thing the
+    // opponent needs to see coming.
+    if (b.debuff) {
+      const def = DEBUFFS[b.debuff];
+      color = def.color;
+      trail = def.color;
+      glow = 26;
+    }
+
     // Blink out over the last two seconds of an element.
-    const expiring = b.type !== 'normal' && b.typeT > 0 && b.typeT < 2;
+    const expiring = (b.type !== 'normal' && b.typeT > 0 && b.typeT < 2) || (b.debuff !== null && b.debuffT < 2);
     const pulse = expiring && Math.sin(t * 26) < 0;
     if (pulse) {
       color = '#ffffff';
@@ -868,6 +878,15 @@ export function drawHud(
     if (tm.speed > 0) active.push(['Ускорение', tm.speed, '#ff4d6d']);
     if (tm.pierce > 0) active.push(['Пробой', tm.pierce, '#ff7a3d']);
     if (tm.invert > 0) active.push(['ИНВЕРСИЯ', tm.invert, '#ff4d6d']);
+    if (tm.frost > 0) active.push(['МОРОЗ', tm.frost, DEBUFFS.frost.color]);
+    if (tm.brittle > 0) active.push(['ХРУПКОСТЬ', tm.brittle, DEBUFFS.brittle.color]);
+    if (tm.repel > 0) active.push(['АНТИМАГНИТ', tm.repel, DEBUFFS.repel.color]);
+    if (tm.jam > 0) active.push(['ГЛУШИЛКА', tm.jam, DEBUFFS.jam.color]);
+    const armed = arena.balls.find((b) => b.debuff);
+    if (armed?.debuff) {
+      const def = DEBUFFS[armed.debuff];
+      active.push([`${def.icon} ${def.name} ${armed.debuffCharge}/${def.perCharge}`, armed.debuffT, def.color]);
+    }
     if (tm.fog > 0) active.push(['ПОМЕХИ', tm.fog, '#8892a4']);
     if (tm.haste > 0) active.push(['РАЗГОН', tm.haste, '#ff4d6d']);
     if (arena.shields > 0) active.push([`Барьер x${arena.shields}`, 0, '#4de2ff']);

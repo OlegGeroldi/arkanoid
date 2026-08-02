@@ -36,6 +36,7 @@ import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
 import { BRICK_KINDS, type Brick, type BrickCode } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
+import { DEBUFFS, type DebuffId } from './debuffs';
 import { BOSSES, type BossDef, type BossId } from './bosses';
 import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
 import { MAX_RANK, SKILLS, SKILL_SLOTS, skillCooldown, skillDuration, type SkillId } from './skills';
@@ -62,6 +63,11 @@ export interface Ball {
   /** Elemental state: drives the ball's colour and what its hits do. */
   type: BallTypeId;
   typeT: number;
+  /** PvP sabotage the ball is carrying, and how long it holds it. */
+  debuff: DebuffId | null;
+  debuffT: number;
+  /** Bricks broken since the last charge was fired at the opponent. */
+  debuffCharge: number;
   trail: { x: number; y: number }[];
 }
 
@@ -88,6 +94,9 @@ export type ArenaEvent =
   | { t: 'bossShotHit'; x: number; y: number }
   | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
+  | { t: 'debuffArmed'; id: DebuffId }
+  | { t: 'debuffSent'; id: DebuffId }
+  | { t: 'debuffHit'; id: DebuffId }
   | { t: 'cleared' }
   | { t: 'dead' }
   | { t: 'garbage' };
@@ -150,6 +159,11 @@ interface Timers {
   stasis: number;
   ghost: number;
   drone: number;
+  /** PvP sabotage received from the opponent. */
+  frost: number;
+  brittle: number;
+  repel: number;
+  jam: number;
 }
 
 /** One equipped ability: what it is, how far it is upgraded, and how long until
@@ -207,6 +221,10 @@ const zeroTimers = (): Timers => ({
   stasis: 0,
   ghost: 0,
   drone: 0,
+  frost: 0,
+  brittle: 0,
+  repel: 0,
+  jam: 0,
 });
 
 export interface SuperState {
@@ -293,6 +311,8 @@ export class Arena {
   /** Charges of the hammer buff waiting to be spent on a brick. */
   hammerHits = 0;
   droneTick = 0;
+  /** How much width the brittle debuff has chewed off the paddle. */
+  brittleWear = 0;
   boss: BossState | null = null;
   bossShots: BossShot[] = [];
   /** Admin cheat: losing the ball costs nothing and it is served straight back. */
@@ -600,6 +620,8 @@ export class Arena {
     for (const key of Object.keys(t) as (keyof Timers)[]) {
       if (t[key] > 0) t[key] = Math.max(0, t[key] - dt);
     }
+    // The paddle grows back once the brittle effect wears off.
+    if (t.brittle <= 0 && this.brittleWear > 0) this.brittleWear = Math.max(0, this.brittleWear - dt * 18);
   }
 
   // --------------------------------------------------------------- paddle ---
@@ -611,6 +633,8 @@ export class Arena {
     if (this.active?.id === 'fracture') w *= 1.55;
     // Stasis III widens the paddle for as long as time is slowed.
     if (this.timers.stasis > 0 && (this.skills.find((s) => s.id === 'stasis')?.rank ?? 0) >= 3) w *= 1.3;
+    // Brittle: the paddle crumbles a little with every save while it lasts.
+    if (this.brittleWear > 0) w -= this.brittleWear;
     return clamp(w, PADDLE_MIN_W, PADDLE_MAX_W);
   }
 
@@ -619,7 +643,7 @@ export class Arena {
     this.paddleW += (this.paddleTargetW - this.paddleW) * Math.min(1, dt * 9);
 
     const inverted = this.timers.invert > 0 ? -1 : 1;
-    const speed = PADDLE_SPEED * this.stats.paddleSpeedMul;
+    const speed = PADDLE_SPEED * this.stats.paddleSpeedMul * (this.timers.frost > 0 ? 0.45 : 1);
 
     if (input.pointer !== null) {
       // The paddle tracks the mouse 1:1. Rate-limiting it here felt like input
@@ -687,8 +711,62 @@ export class Arena {
       fireT: 0,
       type: 'normal',
       typeT: 0,
+      debuff: null,
+      debuffT: 0,
+      debuffCharge: 0,
       trail: [],
     };
+  }
+
+  /** Loads every ball with a sabotage charge (PvP capsules). */
+  setBallDebuff(id: DebuffId): void {
+    const def = DEBUFFS[id];
+    for (const b of this.balls) {
+      b.debuff = id;
+      b.debuffT = def.ballDuration;
+      b.debuffCharge = 0;
+    }
+    this.events.push({ t: 'debuffArmed', id });
+  }
+
+  /** Sabotage arriving from the other player. */
+  applyDebuff(id: DebuffId): void {
+    const def = DEBUFFS[id];
+    switch (id) {
+      case 'frost':
+        this.timers.frost = Math.max(this.timers.frost, def.duration);
+        break;
+      case 'mirror':
+        this.timers.invert = Math.max(this.timers.invert, def.duration);
+        break;
+      case 'brittle':
+        this.timers.brittle = Math.max(this.timers.brittle, def.duration);
+        break;
+      case 'repel':
+        this.timers.repel = Math.max(this.timers.repel, def.duration);
+        break;
+      case 'blind':
+        this.timers.fog = Math.max(this.timers.fog, def.duration);
+        break;
+      case 'haste':
+        this.timers.haste = Math.max(this.timers.haste, def.duration);
+        break;
+      case 'jam':
+        this.timers.jam = Math.max(this.timers.jam, def.duration);
+        for (const slot of this.skills) slot.cd = Math.max(slot.cd, def.duration);
+        break;
+      case 'steel':
+        this.pushGarbageRow('s');
+        break;
+      case 'quake':
+        this.pushGarbageRow();
+        this.shake = 1;
+        break;
+      case 'drain':
+        this.energy = Math.max(0, this.energy - 45);
+        break;
+    }
+    this.events.push({ t: 'debuffHit', id });
   }
 
   /** Recolours every ball in play and gives it an element for a while. */
@@ -746,6 +824,13 @@ export class Arena {
       if (ball.typeT > 0) {
         ball.typeT -= dt;
         if (ball.typeT <= 0) ball.type = 'normal';
+      }
+      if (ball.debuffT > 0) {
+        ball.debuffT -= dt;
+        if (ball.debuffT <= 0) {
+          ball.debuff = null;
+          ball.debuffCharge = 0;
+        }
       }
       if (ball.held !== null) continue;
 
@@ -895,7 +980,17 @@ export class Arena {
           dmg *= 5;
           if ((this.skills.find((s) => s.id === 'hammer')?.rank ?? 0) >= 3) this.explode(brick, 1.4);
         }
+        const wasAlive = brick.alive;
         this.damageBrick(brick, dmg);
+        // A sabotage ball builds a charge as it works; every few bricks the
+        // effect ships to the opponent.
+        if (ball.debuff && wasAlive && !brick.alive) {
+          ball.debuffCharge++;
+          if (ball.debuffCharge >= DEBUFFS[ball.debuff].perCharge) {
+            ball.debuffCharge = 0;
+            this.events.push({ t: 'debuffSent', id: ball.debuff });
+          }
+        }
         if (ball.fireT > 0) this.explode(brick, 1.1);
         this.elementalImpact(ball, brick);
         if (!piercing) return;
@@ -1044,8 +1139,9 @@ export class Arena {
 
     const pool: PowerupId[] = [];
     for (const def of POWERUP_LIST) {
-      const w = def.bad ? def.weight : def.weight;
-      for (let i = 0; i < w; i++) pool.push(def.id);
+      // Sabotage capsules exist only where there is someone to sabotage.
+      if (def.pvpOnly && this.mode !== 'versus') continue;
+      for (let i = 0; i < def.weight; i++) pool.push(def.id);
     }
     const id = this.rng.pick(pool);
     this.powerups.push({
@@ -1075,6 +1171,12 @@ export class Arena {
       if (magnet > 0 && p.y > ARENA_H * 0.45) {
         const dx = this.paddleX - (p.x + POWERUP_W / 2);
         p.x += clamp(dx, -1, 1) * magnet * 130 * dt;
+      }
+      // Anti-magnet: capsules shy away from the paddle instead.
+      if (this.timers.repel > 0) {
+        const dx = this.paddleX - (p.x + POWERUP_W / 2);
+        p.x -= clamp(dx, -1, 1) * 150 * dt;
+        p.x = clamp(p.x, WALL, this.width - WALL - POWERUP_W);
       }
 
       const inRow = p.y + POWERUP_H >= PADDLE_Y && p.y <= PADDLE_Y + PADDLE_H;
@@ -1160,6 +1262,13 @@ export class Arena {
       case 'ballVoid':
         if (this.balls.length === 0) this.addBall();
         this.setBallType(def.ball!);
+        break;
+
+      default:
+        if (def.debuff) {
+          if (this.balls.length === 0) this.addBall();
+          this.setBallDebuff(def.debuff);
+        }
         break;
     }
   }
@@ -1506,7 +1615,7 @@ export class Arena {
 
   /** Shove the whole field down one row and add a garbage row on top.
    *  Anything pushed past the bottom row crushes the player for a life. */
-  pushGarbageRow(): void {
+  pushGarbageRow(forceCode?: BrickCode): void {
     const sorted = this.bricks.filter((b) => b.alive).sort((a, b) => b.row - a.row);
     let crushed = false;
     for (const b of sorted) {
@@ -1523,9 +1632,11 @@ export class Arena {
     }
 
     // Boss pushes bring a mixed wall rather than a grey slab of garbage.
-    const palette: BrickCode[] = this.boss
-      ? ['b', 'b', 'n', 'n', 't', 's', 'e', 'g', 'r']
-      : ['b'];
+    const palette: BrickCode[] = forceCode
+      ? [forceCode]
+      : this.boss
+        ? ['b', 'b', 'n', 'n', 't', 's', 'e', 'g', 'r']
+        : ['b'];
 
     for (let c = 0; c < this.cols; c++) {
       if (this.rng.chance(0.12)) continue;

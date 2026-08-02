@@ -1,4 +1,5 @@
 import type { BallTypeId } from './balls';
+import { DEBUFF_LIST, type DebuffId } from './debuffs';
 
 export type PowerupId =
   | 'expand'
@@ -17,7 +18,8 @@ export type PowerupId =
   | 'ballAqua'
   | 'ballLaser'
   | 'ballPlasma'
-  | 'ballVoid';
+  | 'ballVoid'
+  | `debuff_${DebuffId}`;
 
 export interface PowerupDef {
   id: PowerupId;
@@ -33,9 +35,16 @@ export interface PowerupDef {
   duration?: number;
   /** Elemental ball this capsule grants, if any. */
   ball?: BallTypeId;
+  /** Sabotage ball this capsule grants. PvP modes only. */
+  debuff?: DebuffId;
+  /** Never drops outside PvP. */
+  pvpOnly?: boolean;
 }
 
-export const POWERUPS: Record<PowerupId, PowerupDef> = {
+// Filled below with the sabotage capsules, hence the partial type here.
+export const POWERUPS = {} as Record<PowerupId, PowerupDef>;
+
+const BASE_POWERUPS: Partial<Record<PowerupId, PowerupDef>> = {
   expand: { id: 'expand', letter: 'E', name: 'Расширение', desc: 'Ракетка шире', color: '#4de2ff', weight: 12, duration: 18 },
   shrink: { id: 'shrink', letter: 'S', name: 'Сжатие', desc: 'Ракетка уже', color: '#ff4d6d', weight: 5, bad: true, duration: 12 },
   multiball: { id: 'multiball', letter: 'D', name: 'Мультимяч', desc: '+2 мяча', color: '#ffd24d', weight: 10 },
@@ -56,6 +65,23 @@ export const POWERUPS: Record<PowerupId, PowerupDef> = {
   ballPlasma: { id: 'ballPlasma', letter: 'Q', name: 'Плазма-болл', desc: 'Цепная молния', color: '#c46bff', weight: 5, ball: 'plasma' },
   ballVoid: { id: 'ballVoid', letter: 'G', name: 'Войд-болл', desc: 'Тяжёлый мяч с притяжением', color: '#8a7bff', weight: 4, ball: 'void' },
 };
+
+Object.assign(POWERUPS, BASE_POWERUPS);
+
+// Sabotage capsules are generated from the debuff table so the two never drift.
+for (const def of DEBUFF_LIST) {
+  const id = `debuff_${def.id}` as PowerupId;
+  POWERUPS[id] = {
+    id,
+    letter: def.letter,
+    name: def.name,
+    desc: def.desc,
+    color: def.color,
+    weight: 7,
+    debuff: def.id,
+    pvpOnly: true,
+  };
+}
 
 export const POWERUP_LIST: PowerupDef[] = Object.values(POWERUPS);
 

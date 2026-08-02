@@ -1,8 +1,9 @@
 import { App, fitBox, type Scene } from '../app';
-import { ARENA_H, ARENA_W } from '../core/constants';
+import { ARENA_H, ARENA_W, ENERGY_MAX } from '../core/constants';
 import { Arena, type ArenaEvent, type ArenaInput } from '../core/arena';
 import type { LevelData } from '../core/level';
 import { SUPERS, type SuperId } from '../core/supers';
+import { DEBUFFS } from '../core/debuffs';
 import { ArenaFx } from '../render/fx';
 import { drawArena, drawHud, FONT } from '../render/renderer';
 import { P1_KEYS, P2_KEYS } from './input';
@@ -87,6 +88,14 @@ export function versusScene(app: App, opts: VersusOptions): Scene {
     for (const e of events) {
       if (e.t === 'attack') {
         attack(side, other);
+      } else if (e.t === 'debuffSent') {
+        // A sabotage ball charged up on this side; the effect lands over there.
+        const def = DEBUFFS[e.id];
+        other.arena.applyDebuff(e.id);
+        if (e.id === 'drain') side.arena.energy = Math.min(ENERGY_MAX, side.arena.energy + 45);
+        other.fx.text(ARENA_W / 2, 240, `${def.icon} ${def.name.toUpperCase()}`, def.color);
+        side.fx.text(ARENA_W / 2, 300, `${def.icon} отправлено`, def.color);
+        sfx.play('garbage');
       } else if (e.t === 'cleared') {
         // Wiping your field is the strongest attack in the game.
         side.fieldsCleared++;
