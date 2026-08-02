@@ -12,7 +12,8 @@ import { el, button } from '../ui/dom';
 import { mainMenu } from '../ui/menu';
 import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
-import { SPEED_CHOICES, type RunSave } from '../core/storage';
+import { ngBallSpeedMul, ngXpMul, SPEED_CHOICES, type RunSave } from '../core/storage';
+import { baseStats } from '../core/progression';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -37,6 +38,8 @@ export interface SoloOptions {
   speed?: number;
   /** Resume a saved run instead of starting fresh. */
   resume?: RunSave;
+  /** New Game+ cycle this run belongs to: harder levels, richer XP. */
+  ngPlus?: number;
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
@@ -47,12 +50,15 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     Math.max(levels.length - 1, 0),
   );
   let speed = resume?.speed ?? opts.speed ?? 1;
+  const cycle = opts.ngPlus ?? 0;
+  // A New Game+ cycle pays more XP; the levels themselves are sped up upstream.
+  const startStats = resume?.stats ?? { ...baseStats(), xpMul: ngXpMul(cycle) };
   let arena = new Arena({
     level: levels[index],
     superId: resume?.superId ?? opts.superId,
     mode: 'solo',
     lives: resume?.lives ?? opts.lives,
-    stats: resume?.stats,
+    stats: startStats,
     perksTaken: resume ? new Map(resume.perks) : undefined,
     xpTotal: resume?.xpTotal,
     xpLevel: resume?.xpLevel,
@@ -193,14 +199,48 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     if (finished) return;
     finished = true;
     bank();
+    // Finishing the campaign opens the next cycle: the account keeps its level
+    // and skills, the campaign starts over faster and richer.
+    const nextCycle = opts.trackProgress ? cycle + 1 : cycle;
     app.saveProfile((p) => {
       p.campaignCleared = Math.max(p.campaignCleared, levels.length);
+      if (opts.trackProgress) {
+        p.ngPlus = Math.max(p.ngPlus, nextCycle);
+        p.campaignReached = 1;
+      }
     });
     clearSave();
-    panel('ПОБЕДА', '#ffd24d', [
-      `Все уровни пройдены. Счёт: ${arena.score}.`,
-      `Опыт забега: ${Math.round(arena.xpEarned)} — зачислен в профиль.`,
-    ], [button('В меню', () => app.setScene(exit), 'btn primary')]);
+
+    panel(
+      'ПОБЕДА',
+      '#ffd24d',
+      [
+        `Все уровни пройдены. Счёт: ${arena.score}.`,
+        `Опыт забега: ${Math.round(arena.xpEarned)} — зачислен в профиль.`,
+        opts.trackProgress
+          ? `Открыт виток ${nextCycle}: мяч быстрее на ${Math.round((ngBallSpeedMul(nextCycle) - 1) * 100)}%, опыта больше на ${Math.round((ngXpMul(nextCycle) - 1) * 100)}%. Уровень профиля и суперы остаются с вами.`
+          : '',
+      ].filter(Boolean),
+      [
+        opts.trackProgress
+          ? button(
+              `Кампания+ (виток ${nextCycle})`,
+              () =>
+                app.setScene((a) =>
+                  soloScene(a, {
+                    ...opts,
+                    levels: a.campaignLevels(),
+                    resume: undefined,
+                    startIndex: 0,
+                    ngPlus: nextCycle,
+                  }),
+                ),
+              'btn primary',
+            )
+          : null,
+        button('В меню', () => app.setScene(exit)),
+      ].filter((b): b is HTMLButtonElement => b !== null),
+    );
   }
 
   function dead(): void {

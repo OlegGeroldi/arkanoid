@@ -3,6 +3,7 @@ import { InputHub } from './game/input';
 import {
   activeProfile,
   loadStore,
+  ngBallSpeedMul,
   saveStore,
   type Profile,
   type Store,
@@ -113,12 +114,19 @@ export class App {
   }
 
   private campaignCache: LevelData[] | null = null;
+  private campaignCacheCycle = -1;
 
-  /** The campaign as it should be played: generated levels with any admin edits
-   *  laid over the top. */
+  /** The campaign as it should be played: generated levels, admin edits laid
+   *  over the top, and the ball sped up for each New Game+ cycle. */
   campaignLevels(): LevelData[] {
-    if (!this.campaignCache) {
-      this.campaignCache = CAMPAIGN_LEVELS.map((level, i) => this.store.campaignOverrides[String(i)] ?? level);
+    const cycle = this.profile.ngPlus;
+    if (!this.campaignCache || this.campaignCacheCycle !== cycle) {
+      const speedMul = ngBallSpeedMul(cycle);
+      this.campaignCache = CAMPAIGN_LEVELS.map((level, i) => {
+        const base = this.store.campaignOverrides[String(i)] ?? level;
+        return cycle === 0 ? base : { ...base, ballSpeed: (base.ballSpeed ?? 1) * speedMul };
+      });
+      this.campaignCacheCycle = cycle;
     }
     return this.campaignCache;
   }

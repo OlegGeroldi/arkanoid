@@ -7,6 +7,8 @@ import {
   isSuperUnlocked,
   loadUserLevels,
   removeProfile,
+  ngBallSpeedMul,
+  ngXpMul,
   LIVES_CHOICES,
   MAX_PROFILES,
   SPEED_CHOICES,
@@ -70,6 +72,7 @@ export function mainMenu(app: App): Scene {
               el('span', { class: 'pill amber' }, `Уровень ${acc.level}`),
               el('span', { class: 'pill' }, `Рекорд ${app.profile.bestScore}`),
               el('span', { class: 'pill pink' }, `Забегов ${app.profile.runs}`),
+              app.profile.ngPlus > 0 ? el('span', { class: 'pill pink' }, `Виток ${app.profile.ngPlus}`) : null,
             ),
             el('div', { class: 'xpbar' }, el('div', { style: `width:${(acc.into / acc.need) * 100}%` })),
             el(
@@ -109,8 +112,13 @@ export function mainMenu(app: App): Scene {
                 },
               )
             : null,
-          modeCard('🎯', 'Кампания', `${CAMPAIGN_SIZE} уровней: с ${CHAOS_FROM}-го — хаос и хардкор`, () =>
-            screenSolo(app.campaignLevels(), 'Кампания', { campaign: true }),
+          modeCard(
+            '🎯',
+            app.profile.save ? 'Новая кампания' : 'Кампания',
+            app.profile.ngPlus > 0
+              ? `Виток ${app.profile.ngPlus}: мяч быстрее на ${Math.round((ngBallSpeedMul(app.profile.ngPlus) - 1) * 100)}%, опыта +${Math.round((ngXpMul(app.profile.ngPlus) - 1) * 100)}%`
+              : `${CAMPAIGN_SIZE} уровней: с ${CHAOS_FROM}-го — хаос и хардкор`,
+            () => screenSolo(app.campaignLevels(), 'Кампания', { campaign: true }),
           ),
           modeCard('🗺', 'Выбор уровня', `Начать с любого из ${CAMPAIGN_SIZE} уровней кампании`, () => screenLevelSelect()),
           modeCard(
@@ -349,6 +357,20 @@ export function mainMenu(app: App): Scene {
             { class: 'hint' },
             `${levels.length} уровней${opts.startIndex ? `, старт с ${opts.startIndex + 1}-го` : ''}. Опыт копится внутри забега — каждый новый уровень мастерства даёт выбор из трёх усилений.`,
           ),
+          opts.campaign && app.profile.ngPlus > 0
+            ? el(
+                'p',
+                { class: 'hint', style: 'color:var(--pink)' },
+                `Виток ${app.profile.ngPlus}: мяч быстрее на ${Math.round((ngBallSpeedMul(app.profile.ngPlus) - 1) * 100)}%, опыт идёт с прибавкой ${Math.round((ngXpMul(app.profile.ngPlus) - 1) * 100)}%. Уровень профиля, суперы и рекорды сохраняются между витками.`,
+              )
+            : null,
+          opts.campaign && app.profile.save
+            ? el(
+                'p',
+                { class: 'hint', style: 'color:var(--amber)' },
+                `Внимание: новый забег перезапишет автосохранение (уровень ${app.profile.save.levelIndex + 1}). Чтобы вернуться к нему, выберите «Продолжить забег» в меню.`,
+              )
+            : null,
           el(
             'div',
             { class: 'row', style: 'gap:26px;margin-top:18px;align-items:flex-start' },
@@ -416,6 +438,7 @@ export function mainMenu(app: App): Scene {
                     trackProgress: opts.campaign === true,
                     lives: app.profile.lives,
                     speed: app.profile.gameSpeed,
+                    ngPlus: opts.campaign ? app.profile.ngPlus : 0,
                   }),
                 ),
               'btn primary',

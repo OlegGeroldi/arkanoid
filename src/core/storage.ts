@@ -50,7 +50,14 @@ export interface Profile {
   gameSpeed: number;
   /** The one autosaved campaign run, or null when there is nothing to continue. */
   save: RunSave | null;
+  /** Completed New Game+ cycles. Account XP and skills carry over; the campaign
+   *  itself gets harder and pays more with every cycle. */
+  ngPlus: number;
 }
+
+/** Difficulty and reward scaling for a New Game+ cycle. */
+export const ngBallSpeedMul = (cycle: number): number => 1 + 0.08 * cycle;
+export const ngXpMul = (cycle: number): number => 1 + 0.25 * cycle;
 
 interface Store {
   version: 2;
@@ -83,6 +90,7 @@ export function makeProfile(name: string, admin = false): Profile {
     lives: 3,
     gameSpeed: 1,
     save: null,
+    ngPlus: 0,
   };
 }
 
@@ -142,6 +150,7 @@ function sanitizeProfile(raw: Partial<Profile>, fallbackName: string): Profile {
   p.lives = LIVES_CHOICES.includes(p.lives as (typeof LIVES_CHOICES)[number]) ? p.lives : 3;
   p.gameSpeed = SPEED_CHOICES.includes(p.gameSpeed as (typeof SPEED_CHOICES)[number]) ? p.gameSpeed : 1;
   p.save = sanitizeSave(p.save);
+  p.ngPlus = Math.max(0, Math.floor(p.ngPlus ?? 0));
   return p;
 }
 
