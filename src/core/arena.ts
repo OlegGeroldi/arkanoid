@@ -301,6 +301,9 @@ export class Arena {
   flash = 0;
   events: ArenaEvent[] = [];
   time = 0;
+  /** Seconds spent on the current level. Feeds the time bonus and nothing else —
+   *  it never pressures the player, it only rewards speed. */
+  levelTime = 0;
   bricksBroken = 0;
 
   constructor(opts: ArenaOptions) {
@@ -344,6 +347,7 @@ export class Arena {
     this.serveTimer = SERVE_DELAY;
     this.combo = 0;
     this.comboTimer = 0;
+    this.levelTime = 0;
   }
 
   private spawnBoss(def: BossDef): BossState {
@@ -514,6 +518,7 @@ export class Arena {
     if (this.state === 'dead' || this.state === 'cleared') return;
     this.input2 = input2 ?? null;
     this.time += dt;
+    if (this.state === 'play' || this.state === 'serve') this.levelTime += dt;
     this.shake = Math.max(0, this.shake - dt * 3.2);
     this.flash = Math.max(0, this.flash - dt * 2.5);
 

@@ -15,6 +15,7 @@ import { BALL_TYPES } from '../core/balls';
 import { SUPERS } from '../core/supers';
 import { SPEC_LIST, SPECS } from '../core/specialisation';
 import { SKILLS, skillCooldown } from '../core/skills';
+import { formatTime } from '../core/stats';
 import type { ArenaFx } from './fx';
 import { clamp } from '../core/math';
 
@@ -825,6 +826,17 @@ export function drawHud(
     });
     cy += 68;
   }
+
+  // Level timer: informative only — it feeds the end-of-level score bonus.
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = `600 11px ${FONT}`;
+  ctx.fillText('ВРЕМЯ УРОВНЯ', pad, cy);
+  ctx.fillStyle = '#ffd24d';
+  ctx.font = `700 13px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.fillText(formatTime(arena.levelTime), w - pad, cy);
+  ctx.textAlign = 'left';
+  cy += 22;
 
   // Score + combo
   ctx.fillStyle = '#ffffff';

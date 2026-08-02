@@ -4,6 +4,7 @@ import { SUPERS, type SuperId } from './supers';
 import { SPECS, type SpecId } from './specialisation';
 import { ROUTES, type RouteId } from './routes';
 import { SKILLS, SKILL_SLOTS, type SkillId } from './skills';
+import type { LevelStats } from './stats';
 
 const LEGACY_PROFILE_KEY = 'neonoid.profile.v1';
 const LEVELS_KEY = 'neonoid.levels.v1';
@@ -59,6 +60,8 @@ export interface Profile {
   gameSpeed: number;
   /** Abilities carried into a run, one per slot. */
   skills: (SkillId | null)[];
+  /** Per-level records: best time, best score, XP earned, clears and deaths. */
+  levelStats: LevelStats;
   /** The one autosaved campaign run, or null when there is nothing to continue. */
   save: RunSave | null;
   /** Completed New Game+ cycles. Account XP and skills carry over; the campaign
@@ -101,6 +104,7 @@ export function makeProfile(name: string, admin = false): Profile {
     lives: 3,
     gameSpeed: 1,
     skills: ['magnet', 'fireball'],
+    levelStats: {},
     save: null,
     ngPlus: 0,
   };
@@ -174,6 +178,7 @@ function sanitizeProfile(raw: Partial<Profile>, fallbackName: string): Profile {
     ? p.skills.slice(0, SKILL_SLOTS).map((id) => (id && id in SKILLS ? id : null))
     : ['magnet', 'fireball'];
   while (p.skills.length < SKILL_SLOTS) p.skills.push(null);
+  p.levelStats = p.levelStats && typeof p.levelStats === 'object' ? p.levelStats : {};
   return p;
 }
 

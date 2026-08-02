@@ -27,6 +27,8 @@ import { music } from '../audio/music';
 import { sfx } from '../audio/sfx';
 import { BALL_TYPE_LIST } from '../core/balls';
 import { SKILL_LIST, SKILL_SLOTS } from '../core/skills';
+import { formatTime, summarise } from '../core/stats';
+import { hall } from '../core/hall';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -35,6 +37,8 @@ export function mainMenu(app: App): Scene {
   /** Which skill slot the next pick fills, and a hook to redraw the setup screen. */
   let editingSlot = 0;
   let renderSolo: (() => void) | null = null;
+  /** Live subscription to the shared hall, dropped when leaving that screen. */
+  let unsubscribe: (() => void) | null = null;
 
   const show = (...nodes: HTMLElement[]): void => {
     app.overlay.classList.add('interactive');
@@ -147,6 +151,8 @@ export function mainMenu(app: App): Scene {
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),
           modeCard('🛠', 'Редактор уровней', 'Рисуйте поля, тестируйте, экспортируйте', () => screenEditor()),
+          modeCard('📊', 'Статистика', 'По каждому уровню и по всем игрокам', () => screenStats()),
+          modeCard('🏆', 'Доска почёта', 'Общая для всех запущенных копий игры', () => screenHall()),
           modeCard('🔊', 'Звук и музыка', 'Громкость эффектов, свои треки из Suno', () => screenAudio()),
           modeCard('⌨️', 'Управление и правила', 'Клавиши, бонусы, шары, кирпичи', () => screenHelp()),
         ),
@@ -632,6 +638,178 @@ export function mainMenu(app: App): Scene {
       );
     };
     render();
+  }
+
+  // ------------------------------------------------------------ statistics --
+
+  function screenStats(): void {
+    const p = app.profile;
+    const sum = summarise(p.levelStats);
+    const levels = app.campaignLevels();
+
+    const rows = Object.entries(p.levelStats)
+      .map(([key, stat]) => ({ index: Number(key), stat }))
+      .filter((r) => r.stat.clears > 0 || r.stat.deaths > 0)
+      .sort((a, b) => a.index - b.index);
+
+    show(
+      el(
+        'div',
+        { class: 'screen' },
+        el('h2', {}, `Статистика · ${p.name}`),
+        el(
+          'div',
+          { class: 'row', style: 'gap:8px;margin-bottom:14px' },
+          el('span', { class: 'pill' }, `Пройдено уровней: ${sum.levelsCleared}`),
+          el('span', { class: 'pill' }, `Зачисток: ${sum.totalClears}`),
+          el('span', { class: 'pill pink' }, `Поражений: ${sum.totalDeaths}`),
+          el('span', { class: 'pill amber' }, `Опыт за уровни: ${sum.totalXp}`),
+          sum.fastest
+            ? el('span', { class: 'pill' }, `Быстрейший: ур. ${sum.fastest.level} за ${formatTime(sum.fastest.time)}`)
+            : null,
+        ),
+
+        rows.length
+          ? el(
+              'div',
+              { class: 'table-wrap' },
+              el(
+                'table',
+                { class: 'stats' },
+                el(
+                  'tr',
+                  {},
+                  el('th', {}, '#'),
+                  el('th', {}, 'Уровень'),
+                  el('th', {}, 'Лучшее время'),
+                  el('th', {}, 'Лучший счёт'),
+                  el('th', {}, 'Опыт'),
+                  el('th', {}, 'Пройден'),
+                  el('th', {}, 'Смертей'),
+                ),
+                ...rows.map((r) =>
+                  el(
+                    'tr',
+                    {},
+                    el('td', {}, String(r.index + 1)),
+                    el('td', {}, levels[r.index]?.name ?? '—'),
+                    el('td', {}, formatTime(r.stat.bestTime)),
+                    el('td', {}, String(r.stat.bestScore)),
+                    el('td', {}, String(r.stat.xp)),
+                    el('td', {}, String(r.stat.clears)),
+                    el('td', {}, String(r.stat.deaths)),
+                  ),
+                ),
+              ),
+            )
+          : el('p', { class: 'hint' }, 'Пока нет данных — пройдите уровень кампании.'),
+
+        el('h3', { style: 'margin-top:20px' }, 'Все игроки'),
+        el(
+          'div',
+          { class: 'table-wrap' },
+          el(
+            'table',
+            { class: 'stats' },
+            el(
+              'tr',
+              {},
+              el('th', {}, 'Игрок'),
+              el('th', {}, 'Уровень'),
+              el('th', {}, 'Общий опыт'),
+              el('th', {}, 'Опыт за уровни'),
+              el('th', {}, 'Рекорд'),
+              el('th', {}, 'Кампания'),
+              el('th', {}, 'Витки'),
+            ),
+            ...app.store.players.map((pl) => {
+              const s = summarise(pl.levelStats);
+              return el(
+                'tr',
+                { class: pl.id === app.store.activeId ? 'me' : '' },
+                el('td', {}, `${pl.admin ? '★ ' : ''}${pl.name}`),
+                el('td', {}, String(accountLevel(pl).level)),
+                el('td', {}, String(Math.round(pl.totalXp))),
+                el('td', {}, String(s.totalXp)),
+                el('td', {}, String(pl.bestScore)),
+                el('td', {}, `${pl.campaignReached}/${CAMPAIGN_SIZE}`),
+                el('td', {}, String(pl.ngPlus)),
+              );
+            }),
+          ),
+        ),
+
+        el('div', { class: 'row', style: 'margin-top:20px' }, button('Назад', screenMain, 'btn primary')),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------- hall of fame --
+
+  function screenHall(): void {
+    const render = (entries: ReturnType<typeof hall.list>): void => {
+      show(
+        el(
+          'div',
+          { class: 'screen' },
+          el('h2', {}, 'Доска почёта'),
+          el(
+            'p',
+            { class: 'hint' },
+            'Таблица общая для всех запущенных копий игры на этом компьютере: результат из соседнего окна появляется здесь сразу, без перезагрузки.',
+          ),
+          entries.length
+            ? el(
+                'div',
+                { class: 'table-wrap' },
+                el(
+                  'table',
+                  { class: 'stats' },
+                  el(
+                    'tr',
+                    {},
+                    el('th', {}, '#'),
+                    el('th', {}, 'Игрок'),
+                    el('th', {}, 'Счёт'),
+                    el('th', {}, 'Уровень'),
+                    el('th', {}, 'Опыт'),
+                    el('th', {}, 'Режим'),
+                    el('th', {}, 'Окно'),
+                  ),
+                  ...entries.map((e, i) =>
+                    el(
+                      'tr',
+                      { class: e.source === hall.sourceId ? 'me' : '' },
+                      el('td', {}, String(i + 1)),
+                      el('td', {}, e.player),
+                      el('td', {}, String(e.score)),
+                      el('td', {}, String(e.level)),
+                      el('td', {}, String(e.xp)),
+                      el('td', {}, e.mode),
+                      el('td', {}, e.source === hall.sourceId ? 'это окно' : 'другое'),
+                    ),
+                  ),
+                ),
+              )
+            : el('p', { class: 'hint' }, 'Пока пусто. Пройдите уровень — результат попадёт сюда.'),
+          el(
+            'div',
+            { class: 'row', style: 'margin-top:20px' },
+            button('Назад', () => {
+              unsubscribe?.();
+              unsubscribe = null;
+              screenMain();
+            }, 'btn primary'),
+            app.profile.admin ? button('Очистить', () => hall.clear(), 'btn small danger') : null,
+          ),
+        ),
+      );
+    };
+
+    // Live updates: another window submitting a score redraws this table.
+    unsubscribe?.();
+    unsubscribe = hall.subscribe(render);
+    render(hall.list());
   }
 
   // ----------------------------------------------------------------- audio --

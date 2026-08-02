@@ -15,6 +15,8 @@ import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
 import { ngBallSpeedMul, ngXpMul, SPEED_CHOICES, type RunSave } from '../core/storage';
 import { baseStats, XP_RATE } from '../core/progression';
+import { formatTime, recordClear, recordDeath, timeBonus } from '../core/stats';
+import { hall } from '../core/hall';
 import { routeChoices, ROUTES, SEGMENT, segmentOf, type RouteDef, type RouteId } from '../core/routes';
 import { generateLevel } from '../core/levelGen';
 
@@ -90,6 +92,10 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   let panelOpen = false;
   let debugOverlay = false;
   let cheatBall: BallTypeId = 'void';
+  /** Marks where the current level started, so per-level stats are isolated. */
+  let xpAtLevelStart = 0;
+  let scoreAtLevelStart = 0;
+  const runId = Math.random().toString(36).slice(2, 8);
   let t = 0;
   const exit = opts.onExit ?? mainMenu;
   music.setScene('game');
@@ -254,7 +260,37 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     nextLevel();
   }
 
+  /** Books the level into the profile's stats and pays the time bonus. */
+  function settleLevel(): number {
+    const seconds = arena.levelTime;
+    const bonus = timeBonus(seconds, index);
+    arena.score += bonus;
+    if (opts.trackProgress) {
+      const xpHere = Math.round(arena.xpEarned - xpAtLevelStart);
+      app.saveProfile((p) => {
+        recordClear(p.levelStats, index, { time: seconds, score: arena.score - scoreAtLevelStart, xp: xpHere });
+      });
+      submitToHall();
+    }
+    xpAtLevelStart = arena.xpEarned;
+    scoreAtLevelStart = arena.score;
+    return bonus;
+  }
+
+  function submitToHall(): void {
+    hall.submit({
+      id: `${app.profile.id}-${runId}`,
+      player: app.profile.name,
+      score: arena.score,
+      level: index + 1,
+      xp: Math.round(arena.xpEarned),
+      time: arena.levelTime,
+      mode: opts.title,
+    });
+  }
+
   function levelCleared(): void {
+    const bonus = settleLevel();
     const isLast = index >= levels.length - 1 && !opts.endless;
     // A route choice replaces the plain "next level" panel at segment borders.
     const atFork = !isLast && opts.trackProgress && (index + 1) % SEGMENT === 0;
@@ -266,6 +302,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       isLast ? 'ПОСЛЕДНИЙ РУБЕЖ ПРОЙДЕН' : `УРОВЕНЬ ${index + 1} ПРОЙДЕН`,
       '#3ddc84',
       [
+        `Время: ${formatTime(arena.levelTime)} · бонус за скорость: +${bonus}`,
         `Счёт: ${arena.score} · опыт за забег: ${Math.round(arena.xpEarned)}`,
         `Уровень мастерства: ${arena.xpLevel} · жизней: ${arena.lives}`,
       ],
@@ -332,6 +369,10 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   function dead(): void {
     if (finished) return;
     finished = true;
+    if (opts.trackProgress) {
+      app.saveProfile((p) => recordDeath(p.levelStats, index));
+      submitToHall();
+    }
     bank();
     const saved = opts.trackProgress ? app.profile.save : null;
     panel('ЗАБЕГ ОКОНЧЕН', '#ff4d6d', [

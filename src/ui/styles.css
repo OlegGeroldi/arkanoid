@@ -247,6 +247,26 @@ pre.code {
   overflow-x: auto;
 }
 
+/* ------------------------------------------------------------ stats table -- */
+
+.table-wrap { max-height: 40vh; overflow: auto; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); }
+
+table.stats { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.stats th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 8px 10px;
+  background: rgba(12, 18, 38, 0.98);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+table.stats td { padding: 7px 10px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+table.stats tr.me td { background: rgba(77, 226, 255, 0.09); color: var(--text); font-weight: 600; }
+table.stats tr:hover td { background: rgba(255, 255, 255, 0.04); }
+
 .toast {
   position: fixed;
   left: 50%;
