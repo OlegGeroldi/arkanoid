@@ -1,5 +1,6 @@
 import { COLS, ROWS, BRICK_W, BRICK_H, GRID_TOP } from './constants';
 import { BRICK_KINDS, EMPTY, isBrickCode, type Brick } from './bricks';
+import { BOSSES, type BossId } from './bosses';
 
 export interface LevelData {
   id: string;
@@ -11,6 +12,8 @@ export interface LevelData {
   ballSpeed?: number;
   /** Background variant index, purely cosmetic. */
   bg?: number;
+  /** Boss guarding this level, if any. */
+  boss?: BossId;
 }
 
 export function emptyRows(): string[] {
@@ -43,6 +46,7 @@ export function normalizeLevel(raw: unknown, fallbackId = 'custom'): LevelData |
     rows,
     ballSpeed: Math.min(Math.max(speed, 0.5), 2.5),
     bg: typeof o.bg === 'number' ? o.bg | 0 : 0,
+    boss: typeof o.boss === 'string' && o.boss in BOSSES ? (o.boss as BossId) : undefined,
   };
 }
 

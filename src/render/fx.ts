@@ -73,6 +73,22 @@ export class ArenaFx {
         case 'garbage':
           this.text(240, 120, 'АТАКА!', '#ff4d6d');
           break;
+        case 'bossHit':
+          this.burst(e.x, e.y, e.color, 10, 150);
+          break;
+        case 'bossPhase':
+          this.text(240, 250, e.phase === 3 ? 'БОСС В ЯРОСТИ' : 'ЩИТ ПРОБИТ', '#ff4d6d');
+          this.ring(240, 120, 300, '#ff4d6d');
+          break;
+        case 'bossShotHit':
+          this.burst(e.x, e.y, '#ff4d6d', 16, 200);
+          this.text(240, 560, 'РАКЕТКА ПОВРЕЖДЕНА', '#ff4d6d');
+          break;
+        case 'bossDead':
+          this.text(240, 300, 'БОСС ПОВЕРЖЕН', '#ffd24d');
+          this.ring(240, 120, 420, '#ffd24d');
+          this.burst(240, 120, '#ffd24d', 60, 320);
+          break;
         case 'lifeLost':
           this.text(240, 520, 'МЯЧ ПОТЕРЯН', '#ff4d6d');
           break;

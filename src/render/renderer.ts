@@ -62,6 +62,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, arena: Arena, fx: Arena
 
   drawBackground(ctx, arena, t);
   drawBricks(ctx, arena);
+  drawBoss(ctx, arena, t);
   drawSuperVisuals(ctx, arena, t);
   drawPowerups(ctx, arena);
   drawLasers(ctx, arena);
@@ -359,6 +360,77 @@ function drawSkillEffects(ctx: CanvasRenderingContext2D, arena: Arena, t: number
     ctx.fillText(`МОЛОТ ×${arena.hammerHits}`, ARENA_W / 2, PADDLE_Y - 30);
     ctx.restore();
   }
+}
+
+/** The boss: body, eye, HP bar and the shots it throws at the paddle. */
+function drawBoss(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void {
+  const boss = arena.boss;
+  if (!boss || boss.dead) return;
+  const { def } = boss;
+  const x = boss.x - def.w / 2;
+  const shielded = arena.bossShielded;
+
+  ctx.save();
+  ctx.globalAlpha = shielded ? 0.55 : 1;
+  // Body
+  ctx.shadowColor = def.color;
+  ctx.shadowBlur = 24;
+  ctx.fillStyle = withAlpha(def.color, 0.3);
+  ctx.beginPath();
+  ctx.roundRect(x, boss.y, def.w, def.h, 12);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = def.color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Eye — widens as the fight gets desperate.
+  const eyeR = 8 + (boss.phase - 1) * 3;
+  const eyeY = boss.y + def.h * 0.5;
+  ctx.fillStyle = boss.phase === 3 ? '#ff4d6d' : '#04070f';
+  ctx.beginPath();
+  ctx.ellipse(boss.x, eyeY, eyeR * 1.6, eyeR, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = boss.hitFlash > 0 ? '#ffffff' : def.color;
+  ctx.beginPath();
+  ctx.arc(boss.x + Math.sin(t * 2) * eyeR * 0.5, eyeY, eyeR * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (boss.hitFlash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${boss.hitFlash * 0.5})`;
+    ctx.beginPath();
+    ctx.roundRect(x, boss.y, def.w, def.h, 12);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // HP bar across the top of the field.
+  ctx.save();
+  ctx.fillStyle = 'rgba(4,7,15,0.7)';
+  ctx.fillRect(WALL, 14, ARENA_W - WALL * 2, 18);
+  bar(ctx, WALL + 4, 19, ARENA_W - WALL * 2 - 8, 8, boss.hp / boss.maxHp, def.color, boss.phase === 3);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `800 10px ${FONT}`;
+  ctx.textAlign = 'left';
+  ctx.fillText(def.name.toUpperCase(), WALL + 6, 15);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = shielded ? '#ffd24d' : withAlpha(def.color, 0.9);
+  ctx.fillText(shielded ? 'ЩИТ АКТИВЕН' : `${Math.ceil(boss.hp)} / ${boss.maxHp}`, ARENA_W - WALL - 6, 15);
+  ctx.textAlign = 'left';
+  ctx.restore();
+
+  // Shots
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of arena.bossShots) {
+    const g = ctx.createRadialGradient(s.x, s.y, 1, s.x, s.y, 12);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.4, def.color);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(s.x - 12, s.y - 12, 24, 24);
+  }
+  ctx.restore();
 }
 
 function drawShield(ctx: CanvasRenderingContext2D, arena: Arena): void {
@@ -700,7 +772,7 @@ export function drawHud(
       const def = SKILLS[slot.id];
       const total = skillCooldown(def, slot.rank);
       const ready = slot.cd <= 0;
-      const cx = pad + 18 + i * 96;
+      const cx = pad + 18 + i * 108;
       const cyy = cy + 18;
 
       ctx.save();
@@ -741,7 +813,7 @@ export function drawHud(
       ctx.font = `600 10px ${FONT}`;
       ctx.fillText(ready ? `ранг ${slot.rank} · готов` : `${slot.cd.toFixed(1)} с`, cx + 22, cyy + 12);
     });
-    cy += 52;
+    cy += 68;
   }
 
   // Score + combo

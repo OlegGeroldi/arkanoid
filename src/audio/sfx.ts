@@ -244,6 +244,18 @@ export class Sfx {
         case 'skill':
           this.play('ballType');
           break;
+        case 'bossHit':
+          this.play('brickHard');
+          break;
+        case 'bossPhase':
+          this.play('garbage');
+          break;
+        case 'bossShotHit':
+          this.play('lifeLost');
+          break;
+        case 'bossDead':
+          this.play('cleared');
+          break;
         case 'lifeLost':
           this.play('lifeLost');
           break;

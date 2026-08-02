@@ -35,6 +35,7 @@ import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
 import { BRICK_KINDS, type Brick } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
+import { BOSSES, type BossDef, type BossId } from './bosses';
 import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
 import { MAX_RANK, SKILLS, SKILL_SLOTS, skillCooldown, skillDuration, type SkillId } from './skills';
 import { buildBricks, breakableCount, type LevelData } from './level';
@@ -81,6 +82,10 @@ export type ArenaEvent =
   | { t: 'ballType'; id: BallTypeId }
   | { t: 'spec'; id: SpecId }
   | { t: 'skill'; id: SkillId; rank: number }
+  | { t: 'bossHit'; x: number; y: number; color: string }
+  | { t: 'bossPhase'; phase: 1 | 2 | 3 }
+  | { t: 'bossShotHit'; x: number; y: number }
+  | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
   | { t: 'cleared' }
   | { t: 'dead' }
@@ -159,6 +164,28 @@ export interface Fireball {
   y: number;
   vy: number;
   rank: number;
+}
+
+/** The boss fights back: it moves, shoots and pushes the field down as it dies. */
+export interface BossState {
+  def: BossDef;
+  x: number;
+  y: number;
+  vx: number;
+  hp: number;
+  maxHp: number;
+  /** 1 shielded, 2 shooting, 3 desperate. */
+  phase: 1 | 2 | 3;
+  fireTimer: number;
+  pushTimer: number;
+  hitFlash: number;
+  dead: boolean;
+}
+
+export interface BossShot {
+  x: number;
+  y: number;
+  vy: number;
 }
 
 const zeroTimers = (): Timers => ({
@@ -248,6 +275,8 @@ export class Arena {
   /** Charges of the hammer buff waiting to be spent on a brick. */
   hammerHits = 0;
   droneTick = 0;
+  boss: BossState | null = null;
+  bossShots: BossShot[] = [];
   /** Admin cheat: losing the ball costs nothing and it is served straight back. */
   god = false;
   shake = 0;
@@ -277,6 +306,8 @@ export class Arena {
 
   loadLevel(level: LevelData): void {
     this.level = level;
+    this.boss = level.boss ? this.spawnBoss(BOSSES[level.boss]) : null;
+    this.bossShots = [];
     this.bricks = buildBricks(level);
     this.grid = new Array(COLS * ROWS).fill(null);
     for (const b of this.bricks) this.grid[b.row * COLS + b.col] = b;
@@ -290,6 +321,156 @@ export class Arena {
     this.serveTimer = SERVE_DELAY;
     this.combo = 0;
     this.comboTimer = 0;
+  }
+
+  private spawnBoss(def: BossDef): BossState {
+    return {
+      def,
+      x: ARENA_W / 2,
+      y: GRID_TOP - 6,
+      vx: def.speed,
+      hp: def.hp,
+      maxHp: def.hp,
+      phase: 1,
+      fireTimer: 2,
+      pushTimer: 6,
+      hitFlash: 0,
+      dead: false,
+    };
+  }
+
+  /** Bricks still standing in front of the boss shield it from damage. Garbage
+   *  rows the boss itself drops do not count — otherwise its phase-3 pushes
+   *  would restore the shield and the fight could never end. */
+  get bossShielded(): boolean {
+    if (!this.boss) return false;
+    return this.bricks.some((b) => b.alive && b.kind.hp > 0 && b.kind.code !== 'b');
+  }
+
+  private updateBoss(dt: number): void {
+    const boss = this.boss;
+    if (!boss || boss.dead) return;
+
+    boss.hitFlash = Math.max(0, boss.hitFlash - dt * 3);
+    const half = boss.def.w / 2;
+    boss.x += boss.vx * dt;
+    if (boss.x < WALL + half) {
+      boss.x = WALL + half;
+      boss.vx = Math.abs(boss.vx);
+    } else if (boss.x > ARENA_W - WALL - half) {
+      boss.x = ARENA_W - WALL - half;
+      boss.vx = -Math.abs(boss.vx);
+    }
+
+    // Phase 1 is the shield: while bricks remain the boss only paces. Once the
+    // field is clear it starts shooting, and below 30% it panics.
+    const ratio = boss.hp / boss.maxHp;
+    const phase: 1 | 2 | 3 = this.bossShielded ? 1 : ratio <= 0.3 ? 3 : 2;
+    if (phase !== boss.phase) {
+      boss.phase = phase;
+      this.events.push({ t: 'bossPhase', phase });
+      this.shake = Math.min(1, this.shake + 0.4);
+      if (phase === 3) boss.vx = boss.vx > 0 ? boss.def.speed * 1.5 : -boss.def.speed * 1.5;
+    }
+
+    if (boss.phase >= 2) {
+      boss.fireTimer -= dt;
+      if (boss.fireTimer <= 0) {
+        boss.fireTimer = boss.def.fireRate * (boss.phase === 3 ? 0.6 : 1);
+        this.bossShots.push({ x: boss.x, y: boss.y + boss.def.h, vy: 260 });
+        if (boss.phase === 3) {
+          this.bossShots.push({ x: boss.x - 26, y: boss.y + boss.def.h, vy: 240 });
+          this.bossShots.push({ x: boss.x + 26, y: boss.y + boss.def.h, vy: 240 });
+        }
+      }
+    }
+
+    if (boss.phase === 3) {
+      boss.pushTimer -= dt;
+      if (boss.pushTimer <= 0) {
+        boss.pushTimer = 9;
+        this.pushGarbageRow();
+      }
+    }
+
+    this.updateBossShots(dt);
+    this.collideBossWithBalls();
+  }
+
+  private updateBossShots(dt: number): void {
+    const half = this.paddleW / 2;
+    for (let i = this.bossShots.length - 1; i >= 0; i--) {
+      const s = this.bossShots[i];
+      s.y += s.vy * dt;
+      if (s.y > ARENA_H) {
+        this.bossShots.splice(i, 1);
+        continue;
+      }
+      // A hit does not kill: it crushes the paddle for a few seconds, which is
+      // punishing enough without ending the run outright.
+      if (s.y >= PADDLE_Y && s.y <= PADDLE_Y + PADDLE_H && Math.abs(s.x - this.paddleX) <= half) {
+        this.bossShots.splice(i, 1);
+        this.timers.shrink = Math.max(this.timers.shrink, 5);
+        this.timers.expand = 0;
+        this.shake = Math.min(1, this.shake + 0.5);
+        this.events.push({ t: 'bossShotHit', x: s.x, y: s.y });
+      }
+    }
+  }
+
+  private collideBossWithBalls(): void {
+    const boss = this.boss;
+    if (!boss || boss.dead) return;
+    const half = boss.def.w / 2;
+
+    for (const ball of this.balls) {
+      if (ball.held !== null) continue;
+      if (ball.x < boss.x - half - ball.r || ball.x > boss.x + half + ball.r) continue;
+      if (ball.y + ball.r < boss.y || ball.y - ball.r > boss.y + boss.def.h) continue;
+
+      // Bounce off regardless; damage only lands once the shield is gone.
+      ball.vy = Math.abs(ball.vy);
+      ball.y = boss.y + boss.def.h + ball.r;
+
+      if (this.bossShielded) {
+        this.events.push({ t: 'hit', x: ball.x, y: ball.y, color: '#5a6472' });
+        continue;
+      }
+
+      let dmg = this.stats.ballDamage + BALL_TYPES[ball.type].damage;
+      if (this.hammerHits > 0) {
+        this.hammerHits--;
+        dmg *= 5;
+      }
+      this.damageBoss(dmg, ball.x, ball.y);
+    }
+  }
+
+  damageBoss(amount: number, x: number, y: number): void {
+    const boss = this.boss;
+    if (!boss || boss.dead || this.bossShielded) return;
+
+    boss.hp -= amount;
+    boss.hitFlash = 1;
+    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * 2 * this.stats.energyMul);
+    this.addXp(12 * amount);
+    this.score += Math.round(10 * amount);
+    this.events.push({ t: 'bossHit', x, y, color: boss.def.color });
+
+    if (boss.hp <= 0) {
+      boss.hp = 0;
+      boss.dead = true;
+      this.bossShots = [];
+      this.shake = 1;
+      this.flash = 1;
+      this.addXp(600);
+      this.score += 2000;
+      this.lives += 1;
+      // A guaranteed skill rank is the reward for a boss.
+      const upgradable = this.skills.filter((s) => s.rank < MAX_RANK);
+      if (upgradable.length) this.upgradeSkill(this.rng.pick(upgradable).id);
+      this.events.push({ t: 'bossDead', id: boss.def.id });
+    }
   }
 
   private cellAt(col: number, row: number): Brick | null {
@@ -359,11 +540,16 @@ export class Arena {
     this.updateLasers(dt);
     this.updatePowerups(dt);
     this.updateBricks(dt);
+    this.updateBoss(dt);
 
     if (this.comboTimer > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) this.combo = 0;
     }
+
+    // On a boss level clearing the bricks only strips the shield: the level
+    // ends when the boss does.
+    if (this.boss && !this.boss.dead) return;
 
     // Losing the last ball on the same tick that empties the field counts as death.
     if (this.remaining <= 0 && this.lives > 0) {
@@ -1133,16 +1319,19 @@ export class Arena {
         if (this.balls.length < 2) this.addBall();
         break;
       case 'singularity': {
-        // Centre the black hole on the densest cluster of live bricks.
+        // Centre the black hole on the densest cluster of live bricks. Counting
+        // neighbours through the grid keeps this linear — comparing every brick
+        // against every other one used to stall the game once garbage rows had
+        // piled hundreds of them up.
         let best = { x: ARENA_W / 2, y: GRID_TOP + 80, n: -1 };
         for (const b of this.bricks) {
           if (!b.alive) continue;
           let n = 0;
-          for (const o of this.bricks) {
-            if (!o.alive) continue;
-            const dx = o.col - b.col;
-            const dy = o.row - b.row;
-            if (dx * dx + dy * dy <= 9) n++;
+          for (let dr = -3; dr <= 3; dr++) {
+            for (let dc = -3; dc <= 3; dc++) {
+              if (dc * dc + dr * dr > 9) continue;
+              if (this.cellAt(b.col + dc, b.row + dr)) n++;
+            }
           }
           if (n > best.n) best = { x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, n };
         }
@@ -1245,6 +1434,10 @@ export class Arena {
       this.grid[c] = brick;
       this.remaining++;
     }
+
+    // Drop bricks that are dead for good, or a long fight would keep growing the
+    // array with every garbage row.
+    this.bricks = this.bricks.filter((b) => b.alive || b.regenTimer > 0);
 
     this.events.push({ t: 'garbage' });
     this.shake = Math.min(1, this.shake + 0.4);
