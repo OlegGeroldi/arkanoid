@@ -14,6 +14,7 @@ import {
 import type { Arena } from '../core/arena';
 import { BALL_TYPES } from '../core/balls';
 import { SUPERS } from '../core/supers';
+import { SPEC_LIST, SPECS } from '../core/specialisation';
 import type { ArenaFx } from './fx';
 import { clamp } from '../core/math';
 
@@ -431,6 +432,54 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
     ctx.restore();
   }
 
+  if (arena.state === 'spec') {
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,7,15,0.86)';
+    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd24d';
+    ctx.font = `800 24px ${FONT}`;
+    ctx.fillText('РАЗВИЛКА ПУТИ', ARENA_W / 2, 140);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = `500 13px ${FONT}`;
+    ctx.fillText('Выберите специализацию на весь забег', ARENA_W / 2, 164);
+
+    SPEC_LIST.forEach((spec, i) => {
+      const y = 200 + i * 112;
+      const x = 34;
+      const w = ARENA_W - 68;
+      ctx.fillStyle = 'rgba(20,28,54,0.95)';
+      ctx.strokeStyle = withAlpha(spec.color, 0.7);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, 96, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = spec.color;
+      ctx.font = `800 28px ${FONT}`;
+      ctx.fillText(spec.icon, x + 18, y + 58);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 18px ${FONT}`;
+      ctx.fillText(spec.name, x + 62, y + 40);
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.font = `500 12px ${FONT}`;
+      wrapText(ctx, spec.desc, x + 62, y + 62, w - 80, 15);
+      ctx.fillStyle = withAlpha(spec.color, 0.9);
+      ctx.font = `800 14px ${FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillText(`[${i + 1}]`, x + w - 14, y + 28);
+      ctx.textAlign = 'left';
+    });
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = `500 12px ${FONT}`;
+    ctx.fillText(`Случайный выбор через ${arena.draftTimer.toFixed(1)} с`, ARENA_W / 2, ARENA_H - 54);
+    ctx.restore();
+  }
+
   if (arena.state === 'dead') {
     ctx.save();
     ctx.fillStyle = 'rgba(30,4,12,0.72)';
@@ -441,6 +490,30 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
     ctx.fillText('ПОРАЖЕНИЕ', ARENA_W / 2, ARENA_H / 2);
     ctx.restore();
   }
+}
+
+/** Naive word wrap for the few places a description needs two lines. */
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+): void {
+  let line = '';
+  let cy = y;
+  for (const word of text.split(' ')) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      ctx.fillText(line, x, cy);
+      line = word;
+      cy += lineHeight;
+    } else {
+      line = next;
+    }
+  }
+  if (line) ctx.fillText(line, x, cy);
 }
 
 // ------------------------------------------------------------------- HUD ----
@@ -494,8 +567,14 @@ export function drawHud(
     ctx.font = `500 12px ${FONT}`;
     ctx.fillText(opt.subtitle, pad, 44);
   }
+  if (arena.spec) {
+    const spec = SPECS[arena.spec];
+    ctx.fillStyle = spec.color;
+    ctx.font = `700 11px ${FONT}`;
+    ctx.fillText(`${spec.icon} ${spec.name}`, pad, opt.subtitle ? 58 : 42);
+  }
 
-  let cy = opt.subtitle ? 64 : 50;
+  let cy = (opt.subtitle ? 64 : 50) + (arena.spec ? 14 : 0);
 
   // Lives
   ctx.fillStyle = 'rgba(255,255,255,0.55)';

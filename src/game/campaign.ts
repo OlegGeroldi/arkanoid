@@ -13,7 +13,9 @@ import { mainMenu } from '../ui/menu';
 import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
 import { ngBallSpeedMul, ngXpMul, SPEED_CHOICES, type RunSave } from '../core/storage';
-import { baseStats } from '../core/progression';
+import { baseStats, XP_RATE } from '../core/progression';
+import { routeChoices, ROUTES, SEGMENT, segmentOf, type RouteDef, type RouteId } from '../core/routes';
+import { generateLevel } from '../core/levelGen';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -43,8 +45,12 @@ export interface SoloOptions {
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
-  const levels = opts.levels.length ? opts.levels : [];
+  // Copied: route forks rewrite segments of this list, and the shared campaign
+  // list must not be mutated underneath the menu.
+  const levels = opts.levels.length ? [...opts.levels] : [];
   const resume = opts.resume;
+  /** Route taken per segment, so the map of the run can be restored and shown. */
+  const routes = new Map<number, RouteId>(resume?.routes ?? []);
   let index = Math.min(
     Math.max(resume?.levelIndex ?? opts.startIndex ?? 0, 0),
     Math.max(levels.length - 1, 0),
@@ -64,7 +70,11 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     xpLevel: resume?.xpLevel,
     score: resume?.score,
   });
-  if (resume) arena.xpEarned = resume.xpEarned;
+  if (resume) {
+    arena.xpEarned = resume.xpEarned;
+    arena.spec = resume.spec ?? null;
+  }
+  applyRoute();
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
   let layout = { scale: 1, ox: 0, oy: 0 };
@@ -98,6 +108,13 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     });
   }
 
+  /** Hands the current segment's route rewards to the arena. */
+  function applyRoute(): void {
+    const route = routes.get(segmentOf(index));
+    arena.routeXpMul = route ? ROUTES[route].xpMul : 1;
+    arena.routeDropMul = route ? ROUTES[route].dropMul : 1;
+  }
+
   /** Autosave. Only ever called between levels, where no ball is in flight and
    *  the run state is unambiguous. */
   function writeSave(): void {
@@ -114,6 +131,8 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
         stats: arena.stats,
         perks: [...arena.perksTaken],
         speed,
+        spec: arena.spec,
+        routes: [...routes],
         savedAt: Date.now(),
       };
     });
@@ -164,9 +183,12 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       score: arena.score,
     };
     const xpEarned = arena.xpEarned;
+    const spec = arena.spec;
     arena = new Arena(carry);
     arena.xpEarned = xpEarned;
+    arena.spec = spec;
     arena.xpInto = 0;
+    applyRoute();
     arena.energy = Math.min(100, arena.energy);
     fx = new ArenaFx();
     markReached();
@@ -174,8 +196,63 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     clearPanel();
   }
 
+  /** After every segment the campaign forks: the next ten levels are rebuilt
+   *  around whichever route the player picks. */
+  function offerRoute(): void {
+    const nextSegment = segmentOf(index + 1);
+    const choices = routeChoices(nextSegment);
+
+    panel(
+      'РАЗВИЛКА',
+      '#ffd24d',
+      [`Куда идти дальше? Выбор определит следующие ${SEGMENT} уровней.`],
+      choices.map((route) =>
+        button(
+          `${route.icon} ${route.name}`,
+          () => {
+            takeRoute(route, nextSegment);
+          },
+          'btn primary small',
+        ),
+      ),
+    );
+
+    // Descriptions go under the buttons so the choice is informed.
+    const screen = app.overlay.querySelector('.screen');
+    if (screen) {
+      for (const route of choices) {
+        screen.append(
+          el(
+            'p',
+            { class: 'hint', style: `color:${route.color};margin:8px 0 0` },
+            `${route.icon} ${route.name}: ${route.desc}`,
+          ),
+        );
+      }
+    }
+  }
+
+  function takeRoute(route: RouteDef, segment: number): void {
+    routes.set(segment, route.id);
+    // Rebuild this segment's levels with the route's recipe.
+    const from = segment * SEGMENT;
+    const to = Math.min(from + SEGMENT, levels.length);
+    for (let i = from; i < to; i++) {
+      levels[i] = generateLevel(i, levels.length, 0x9e37 + cycle * 101, route);
+    }
+    fx.text(240, 300, route.name.toUpperCase(), route.color);
+    sfx.play('levelup');
+    nextLevel();
+  }
+
   function levelCleared(): void {
     const isLast = index >= levels.length - 1 && !opts.endless;
+    // A route choice replaces the plain "next level" panel at segment borders.
+    const atFork = !isLast && opts.trackProgress && (index + 1) % SEGMENT === 0;
+    if (atFork) {
+      offerRoute();
+      return;
+    }
     panel(
       isLast ? 'ПОСЛЕДНИЙ РУБЕЖ ПРОЙДЕН' : `УРОВЕНЬ ${index + 1} ПРОЙДЕН`,
       '#3ddc84',
@@ -290,6 +367,10 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       cheatBall = next;
       if (arena.balls.length === 0) arena.addBall();
       arena.setBallType(next);
+    }
+    if (input.wasPressed(['KeyU'])) {
+      // Straight to the next mastery level, for testing perks and the fork.
+      arena.addXp((arena.xpNeed - arena.xpInto) / (arena.stats.xpMul * arena.routeXpMul * XP_RATE) + 1);
     }
     if (input.wasPressed(['KeyO'])) debugOverlay = !debugOverlay;
   }

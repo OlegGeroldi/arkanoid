@@ -35,6 +35,7 @@ import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
 import { BRICK_KINDS, type Brick } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
+import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
 import { buildBricks, breakableCount, type LevelData } from './level';
 import { POWERUP_LIST, POWERUPS, type FallingPowerup, type PowerupId } from './powerups';
 import { SUPERS, type SuperId } from './supers';
@@ -42,7 +43,7 @@ import { baseStats, rollPerks, xpForLevel, XP_RATE, type Perk, type RunStats } f
 
 export type ArenaMode = 'solo' | 'versus';
 
-export type ArenaState = 'serve' | 'play' | 'levelup' | 'cleared' | 'dead';
+export type ArenaState = 'serve' | 'play' | 'levelup' | 'spec' | 'cleared' | 'dead';
 
 export interface Ball {
   x: number;
@@ -77,6 +78,7 @@ export type ArenaEvent =
   | { t: 'levelup'; level: number }
   | { t: 'super'; id: SuperId }
   | { t: 'ballType'; id: BallTypeId }
+  | { t: 'spec'; id: SpecId }
   | { t: 'attack'; power: number }
   | { t: 'cleared' }
   | { t: 'dead' }
@@ -183,6 +185,12 @@ export class Arena {
   perksTaken = new Map<string, number>();
   draft: Perk[] = [];
   draftTimer = 0;
+  /** Chosen once per run at mastery level 5; tilts every later draft. */
+  spec: SpecId | null = null;
+  /** Rewards of the route this segment belongs to. Set by the campaign scene
+   *  per level, so they swap cleanly at a fork instead of accumulating. */
+  routeXpMul = 1;
+  routeDropMul = 1;
 
   xpTotal = 0;
   xpLevel = 1;
@@ -263,6 +271,16 @@ export class Arena {
         this.pickPerk(input.pick - 1);
       } else if (this.draftTimer <= 0 && this.draft.length > 0) {
         this.pickPerk(0);
+      }
+      return;
+    }
+
+    if (this.state === 'spec') {
+      this.draftTimer = Math.max(0, this.draftTimer - dt);
+      if (input.pick > 0 && input.pick <= SPEC_LIST.length) {
+        this.pickSpec(input.pick - 1);
+      } else if (this.draftTimer <= 0) {
+        this.pickSpec(this.rng.int(0, SPEC_LIST.length));
       }
       return;
     }
@@ -387,9 +405,10 @@ export class Arena {
   /** Recolours every ball in play and gives it an element for a while. */
   setBallType(id: BallTypeId): void {
     const def = BALL_TYPES[id];
+    const mul = this.spec ? SPECS[this.spec].elementDurationMul ?? 1 : 1;
     for (const b of this.balls) {
       b.type = id;
-      b.typeT = def.duration;
+      b.typeT = def.duration * mul;
     }
     this.events.push({ t: 'ballType', id });
   }
@@ -710,7 +729,7 @@ export class Arena {
   }
 
   private rollDrop(brick: Brick, cx: number, cy: number): void {
-    const chance = POWERUP_BASE_CHANCE * brick.kind.dropMul * this.stats.dropChanceMul;
+    const chance = POWERUP_BASE_CHANCE * brick.kind.dropMul * this.stats.dropChanceMul * this.routeDropMul;
     if (!brick.kind.gift && !this.rng.chance(chance)) return;
 
     const pool: PowerupId[] = [];
@@ -852,7 +871,7 @@ export class Arena {
       const row = Math.floor((l.y - GRID_TOP) / BRICK_H);
       const brick = this.cellAt(col, row);
       if (brick) {
-        this.damageBrick(brick, 1);
+        this.damageBrick(brick, this.spec ? SPECS[this.spec].laserDamage ?? 1 : 1);
         this.lasers.splice(i, 1);
       }
     }
@@ -990,7 +1009,7 @@ export class Arena {
   // -------------------------------------------------------------------- xp --
 
   addXp(amount: number): void {
-    const gain = amount * this.stats.xpMul * XP_RATE;
+    const gain = amount * this.stats.xpMul * this.routeXpMul * XP_RATE;
     this.xpTotal += gain;
     this.xpEarned += gain;
     this.xpInto += gain;
@@ -1006,11 +1025,30 @@ export class Arena {
     if (this.stats.lifePerLevel) this.lives++;
     this.energy = Math.min(ENERGY_MAX, this.energy + 15);
     this.events.push({ t: 'levelup', level: this.xpLevel });
-    this.draft = rollPerks(this.rng, this.perksTaken);
+
+    // Level 5 is the fork in the build: pick a specialisation instead of a perk.
+    if (this.xpLevel >= SPEC_LEVEL && !this.spec) {
+      this.draftTimer = 12;
+      this.state = 'spec';
+      return;
+    }
+
+    this.draft = rollPerks(this.rng, this.perksTaken, 3, this.spec ? SPECS[this.spec].favours : []);
     if (this.draft.length > 0) {
       this.draftTimer = 8;
       this.state = 'levelup';
     }
+  }
+
+  pickSpec(index: number): void {
+    const def = SPEC_LIST[index];
+    if (!def || this.spec) return;
+    this.spec = def.id;
+    def.apply(this.stats);
+    this.shields += def.id === 'warden' ? 2 : 0;
+    if (def.id === 'warden') this.lives += 2;
+    this.events.push({ t: 'spec', id: def.id });
+    this.state = this.balls.length > 0 ? 'play' : 'serve';
   }
 
   pickPerk(index: number): void {

@@ -1,6 +1,8 @@
 import { normalizeLevel, type LevelData } from './level';
 import { accountLevelFromXp, baseStats, type RunStats } from './progression';
 import { SUPERS, type SuperId } from './supers';
+import { SPECS, type SpecId } from './specialisation';
+import { ROUTES, type RouteId } from './routes';
 
 const LEGACY_PROFILE_KEY = 'neonoid.profile.v1';
 const LEVELS_KEY = 'neonoid.levels.v1';
@@ -24,6 +26,10 @@ export interface RunSave {
   /** Perk id -> stacks taken. */
   perks: [string, number][];
   speed: number;
+  /** Build specialisation chosen at mastery level 5, if any. */
+  spec: SpecId | null;
+  /** Route chosen per segment: [segmentIndex, routeId]. */
+  routes: [number, RouteId][];
   savedAt: number;
 }
 
@@ -130,6 +136,10 @@ function sanitizeSave(raw: unknown): RunSave | null {
     stats: { ...baseStats(), ...(s.stats ?? {}) },
     perks: Array.isArray(s.perks) ? s.perks.filter((p) => Array.isArray(p) && p.length === 2) : [],
     speed: SPEED_CHOICES.includes(s.speed as (typeof SPEED_CHOICES)[number]) ? s.speed! : 1,
+    spec: s.spec && s.spec in SPECS ? s.spec : null,
+    routes: Array.isArray(s.routes)
+      ? s.routes.filter((r): r is [number, RouteId] => Array.isArray(r) && r.length === 2 && r[1] in ROUTES)
+      : [],
     savedAt: s.savedAt ?? Date.now(),
   };
 }

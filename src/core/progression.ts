@@ -1,4 +1,5 @@
 import type { Rng } from './rng';
+import type { PerkTag } from './specialisation';
 
 /** Every gameplay number a perk is allowed to touch. The arena reads these each
  *  tick, so a perk never has to reach into arena internals. */
@@ -52,6 +53,8 @@ export interface Perk {
   maxStacks: number;
   /** Higher = shows up more often in a draft. */
   weight: number;
+  /** Families this perk belongs to; a specialisation favours some of them. */
+  tags: PerkTag[];
   apply(s: RunStats): void;
   /** Applied once, immediately, on pick (lives, energy, extra ball in play). */
   instant?: { lives?: number; energy?: number; balls?: number };
@@ -65,6 +68,7 @@ export const PERKS: Perk[] = [
     icon: '▬',
     maxStacks: 4,
     weight: 10,
+    tags: ['defense', 'control'],
     apply: (s) => (s.paddleWidthMul *= 1.18),
   },
   {
@@ -74,6 +78,7 @@ export const PERKS: Perk[] = [
     icon: '»',
     maxStacks: 4,
     weight: 9,
+    tags: ['control'],
     apply: (s) => (s.paddleSpeedMul *= 1.2),
   },
   {
@@ -83,6 +88,7 @@ export const PERKS: Perk[] = [
     icon: '●',
     maxStacks: 3,
     weight: 8,
+    tags: ['weapon'],
     apply: (s) => (s.ballDamage += 1),
   },
   {
@@ -92,6 +98,7 @@ export const PERKS: Perk[] = [
     icon: '✶',
     maxStacks: 4,
     weight: 8,
+    tags: ['weapon'],
     apply: (s) => (s.critChance += 0.15),
   },
   {
@@ -101,6 +108,7 @@ export const PERKS: Perk[] = [
     icon: '◈',
     maxStacks: 3,
     weight: 9,
+    tags: ['greed'],
     apply: (s) => (s.dropChanceMul *= 1.35),
   },
   {
@@ -110,6 +118,7 @@ export const PERKS: Perk[] = [
     icon: '∪',
     maxStacks: 2,
     weight: 7,
+    tags: ['greed', 'control'],
     apply: (s) => (s.magnet += 0.5),
   },
   {
@@ -119,6 +128,7 @@ export const PERKS: Perk[] = [
     icon: '✦',
     maxStacks: 4,
     weight: 9,
+    tags: ['greed'],
     apply: (s) => (s.xpMul *= 1.25),
   },
   {
@@ -128,6 +138,7 @@ export const PERKS: Perk[] = [
     icon: '⚡',
     maxStacks: 3,
     weight: 9,
+    tags: ['weapon', 'greed'],
     apply: (s) => (s.energyMul *= 1.3),
   },
   {
@@ -137,6 +148,7 @@ export const PERKS: Perk[] = [
     icon: '♥',
     maxStacks: 5,
     weight: 7,
+    tags: ['defense'],
     apply: (s) => (s.bonusLives += 1),
     instant: { lives: 1 },
   },
@@ -147,6 +159,7 @@ export const PERKS: Perk[] = [
     icon: '◎',
     maxStacks: 2,
     weight: 6,
+    tags: ['element', 'weapon'],
     apply: (s) => (s.extraBalls += 1),
     instant: { balls: 1 },
   },
@@ -157,6 +170,7 @@ export const PERKS: Perk[] = [
     icon: '↑',
     maxStacks: 1,
     weight: 5,
+    tags: ['weapon'],
     apply: (s) => (s.laserAlways = true),
   },
   {
@@ -166,6 +180,7 @@ export const PERKS: Perk[] = [
     icon: '▭',
     maxStacks: 3,
     weight: 7,
+    tags: ['defense'],
     apply: (s) => (s.bonusShields += 2),
   },
   {
@@ -175,6 +190,7 @@ export const PERKS: Perk[] = [
     icon: '✚',
     maxStacks: 1,
     weight: 4,
+    tags: ['defense'],
     apply: (s) => (s.lifePerLevel = true),
   },
   {
@@ -184,6 +200,7 @@ export const PERKS: Perk[] = [
     icon: '∞',
     maxStacks: 3,
     weight: 7,
+    tags: ['greed', 'control'],
     apply: (s) => (s.comboBonus += 4),
   },
   {
@@ -193,6 +210,7 @@ export const PERKS: Perk[] = [
     icon: '✷',
     maxStacks: 4,
     weight: 7,
+    tags: ['weapon', 'element'],
     apply: (s) => (s.explosiveTouch += 0.12),
   },
   {
@@ -202,6 +220,7 @@ export const PERKS: Perk[] = [
     icon: '◁',
     maxStacks: 3,
     weight: 6,
+    tags: ['control', 'defense'],
     apply: (s) => (s.ballSpeedMul *= 0.92),
   },
   {
@@ -211,6 +230,7 @@ export const PERKS: Perk[] = [
     icon: '◍',
     maxStacks: 5,
     weight: 6,
+    tags: ['weapon', 'greed'],
     apply: () => {},
     instant: { energy: 40 },
   },
@@ -229,11 +249,19 @@ export const xpForLevel = (level: number): number => Math.round(110 * Math.pow(l
 
 /** Draft of three perks, respecting stack limits. Uses the arena's seeded RNG so
  *  a replayed run offers the same choices. */
-export function rollPerks(rng: Rng, taken: Map<string, number>, count = 3): Perk[] {
+export function rollPerks(
+  rng: Rng,
+  taken: Map<string, number>,
+  count = 3,
+  favours: PerkTag[] = [],
+): Perk[] {
   const pool: Perk[] = [];
   for (const perk of PERKS) {
     if ((taken.get(perk.id) ?? 0) >= perk.maxStacks) continue;
-    for (let i = 0; i < perk.weight; i++) pool.push(perk);
+    // A specialisation triples the weight of the families it favours, so the
+    // draft starts leaning the way the player committed to.
+    const bias = favours.length && perk.tags.some((t) => favours.includes(t)) ? 3 : 1;
+    for (let i = 0; i < perk.weight * bias; i++) pool.push(perk);
   }
   const picked: Perk[] = [];
   const seen = new Set<string>();

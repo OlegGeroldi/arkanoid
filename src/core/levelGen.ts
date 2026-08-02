@@ -2,6 +2,7 @@ import { COLS, ROWS } from './constants';
 import { EMPTY, type BrickCode } from './bricks';
 import { normalizeLevel, type LevelData } from './level';
 import { Rng } from './rng';
+import type { RouteDef } from './routes';
 
 /** Difficulty knobs derived from the campaign position, 0 (easy) to 1 (brutal). */
 interface Recipe {
@@ -115,9 +116,9 @@ const SHAPERS: Shaper[] = [solidBlock, checker, pyramid, columns, rings, diagona
 
 // ------------------------------------------------------------------ recipe --
 
-function recipeFor(index: number, total: number): Recipe {
+function recipeFor(index: number, total: number, route?: RouteDef): Recipe {
   const t = Math.min(1, index / (total - 1));
-  const chaos = t >= 0.8; // the final fifth is unhinged
+  let chaos = t >= 0.8; // the final fifth is unhinged
 
   // Brick palette widens and hardens as the campaign advances.
   const palette: BrickCode[] = ['n', 'n', 'n'];
@@ -129,11 +130,17 @@ function recipeFor(index: number, total: number): Recipe {
   if (t > 0.7) palette.push('s', 'r', 'x', 'e');
   if (chaos) palette.push('s', 's', 'x', 'r', 'e', 'g');
 
+  // A route stacks its signature bricks on top and bends the numbers its way.
+  if (route) {
+    palette.push(...route.palette, ...route.palette);
+    if (route.id === 'wastes' && t > 0.25) chaos = true;
+  }
+
   return {
-    density: 0.42 + t * 0.5,
+    density: Math.min(0.95, (0.42 + t * 0.5) * (route?.density ?? 1)),
     rows: Math.min(ROWS - 2, Math.round(4 + t * 11)),
     palette,
-    ballSpeed: +(0.95 + t * 0.75).toFixed(2),
+    ballSpeed: +((0.95 + t * 0.75) * (route?.ballSpeed ?? 1)).toFixed(2),
     chaos,
   };
 }
@@ -193,9 +200,9 @@ const STAGE_NAMES = [
 
 /** Builds one campaign level. Deterministic: the same index always produces the
  *  same field, so progress and level select stay meaningful between sessions. */
-export function generateLevel(index: number, total: number, seed = 0x9e37): LevelData {
-  const rng = new Rng((seed + index * 2654435761) >>> 0);
-  const recipe = recipeFor(index, total);
+export function generateLevel(index: number, total: number, seed = 0x9e37, route?: RouteDef): LevelData {
+  const rng = new Rng((seed + index * 2654435761 + (route ? route.id.length * 7919 : 0)) >>> 0);
+  const recipe = recipeFor(index, total, route);
   const grid = blank();
 
   const shaper = recipe.chaos ? rng.pick(SHAPERS) : SHAPERS[index % SHAPERS.length];
@@ -212,9 +219,10 @@ export function generateLevel(index: number, total: number, seed = 0x9e37): Leve
   breakSteelRows(grid, recipe.rows);
 
   const rows = grid.map((row) => row.join(''));
-  const name = recipe.chaos
+  const baseName = recipe.chaos
     ? `${rng.pick(CHAOS_NAMES)}-${index + 1}`
     : `${STAGE_NAMES[index % STAGE_NAMES.length]} ${Math.floor(index / STAGE_NAMES.length) + 1}`;
+  const name = route ? `${route.name}: ${baseName}` : baseName;
 
   const level = normalizeLevel(
     {
