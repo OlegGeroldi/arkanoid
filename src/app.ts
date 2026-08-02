@@ -1,8 +1,16 @@
 import { MAX_FRAME } from './core/constants';
 import { InputHub } from './game/input';
-import { loadProfile, saveProfile, type Profile } from './core/storage';
+import {
+  activeProfile,
+  loadStore,
+  saveStore,
+  type Profile,
+  type Store,
+} from './core/storage';
 import { sfx } from './audio/sfx';
 import { music } from './audio/music';
+import { CAMPAIGN_LEVELS } from './core/campaignLevels';
+import type { LevelData } from './core/level';
 
 export interface Scene {
   update(dt: number): void;
@@ -34,7 +42,7 @@ export class App {
   readonly ctx: CanvasRenderingContext2D;
   readonly overlay: HTMLElement;
   readonly input: InputHub;
-  profile: Profile;
+  store: Store;
 
   /** Canvas size in CSS pixels. */
   width = 0;
@@ -56,7 +64,7 @@ export class App {
     this.ctx = ctx;
     this.overlay = overlay;
     this.input = new InputHub(canvas);
-    this.profile = loadProfile();
+    this.store = loadStore();
 
     this.resize();
     window.addEventListener('resize', this.resize);
@@ -87,9 +95,42 @@ export class App {
     this.scene = factory(this);
   }
 
+  /** The profile currently playing. */
+  get profile(): Profile {
+    return activeProfile(this.store);
+  }
+
   saveProfile(mutate: (p: Profile) => void): void {
     mutate(this.profile);
-    saveProfile(this.profile);
+    saveStore(this.store);
+  }
+
+  /** Persists the whole store — profile list, active player, campaign edits. */
+  commitStore(mutate?: (s: Store) => void): void {
+    mutate?.(this.store);
+    saveStore(this.store);
+    this.campaignCache = null;
+  }
+
+  private campaignCache: LevelData[] | null = null;
+
+  /** The campaign as it should be played: generated levels with any admin edits
+   *  laid over the top. */
+  campaignLevels(): LevelData[] {
+    if (!this.campaignCache) {
+      this.campaignCache = CAMPAIGN_LEVELS.map((level, i) => this.store.campaignOverrides[String(i)] ?? level);
+    }
+    return this.campaignCache;
+  }
+
+  switchProfile(id: string): void {
+    if (!this.store.players.some((p) => p.id === id)) return;
+    this.store.activeId = id;
+    saveStore(this.store);
+    // Audio settings belong to the player, so they follow the switch.
+    sfx.setVolume(this.profile.sfxVolume);
+    music.setVolume(this.profile.musicVolume);
+    music.setEnabled(this.profile.musicOn);
   }
 
   /** Mouse position in canvas CSS pixels, or null. */

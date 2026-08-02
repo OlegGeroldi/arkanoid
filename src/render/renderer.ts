@@ -615,6 +615,48 @@ export function drawHud(
   ctx.restore();
 }
 
+/** Admin debug overlay: what the simulation actually thinks is going on. */
+export function drawDebug(
+  ctx: CanvasRenderingContext2D,
+  arena: Arena,
+  x: number,
+  y: number,
+  extra: Record<string, string | number>,
+): void {
+  const ball = arena.balls[0];
+  const lines: string[] = [
+    `state    ${arena.state}`,
+    `seed     ${arena.seed}`,
+    `bricks   ${arena.bricks.filter((b) => b.alive).length} live / ${arena.remaining} left`,
+    `balls    ${arena.balls.length}${ball ? ` · ${ball.type}` : ''}`,
+    ball ? `ball v   ${Math.hypot(ball.vx, ball.vy).toFixed(0)} px/s @ ${ball.x.toFixed(0)},${ball.y.toFixed(0)}` : 'ball v   —',
+    `paddle   ${arena.paddleX.toFixed(0)} · w ${arena.paddleW.toFixed(0)}`,
+    `energy   ${arena.energy.toFixed(0)} / ${100}`,
+    `combo    x${arena.combo} · broken ${arena.bricksBroken}`,
+    `powerups ${arena.powerups.length} · lasers ${arena.lasers.length}`,
+    `god      ${arena.god ? 'ON' : 'off'}`,
+    ...Object.entries(extra).map(([k, v]) => `${k.padEnd(8)} ${v}`),
+  ];
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(4,8,18,0.82)';
+  ctx.strokeStyle = 'rgba(61,220,132,0.45)';
+  ctx.lineWidth = 1;
+  const w = 216;
+  const h = 18 + lines.length * 14;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, w, h, 8);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#3ddc84';
+  ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+  ctx.textAlign = 'left';
+  lines.forEach((line, i) => ctx.fillText(line, 10, 22 + i * 14));
+  ctx.restore();
+}
+
 export function bar(
   ctx: CanvasRenderingContext2D,
   x: number,

@@ -199,6 +199,8 @@ export class Arena {
   active: SuperState | null = null;
 
   timers = zeroTimers();
+  /** Admin cheat: losing the ball costs nothing and it is served straight back. */
+  god = false;
   shake = 0;
   flash = 0;
   events: ArenaEvent[] = [];
@@ -759,6 +761,18 @@ export class Arena {
     }
   }
 
+  /** Admin cheat: hand the player a pickup without waiting for a drop. */
+  grantPowerup(id: PowerupId): void {
+    this.collect(id, this.paddleX, PADDLE_Y - 20);
+  }
+
+  /** Admin cheat: wipe every breakable brick, ending the level immediately. */
+  clearField(): void {
+    for (const b of this.bricks) {
+      if (b.alive && b.kind.hp > 0) this.destroyBrick(b);
+    }
+  }
+
   private collect(id: PowerupId, x: number, y: number): void {
     const def = POWERUPS[id];
     this.events.push({ t: 'powerup', id, x, y });
@@ -1015,6 +1029,12 @@ export class Arena {
   // ------------------------------------------------------------------ life --
 
   private loseLife(): void {
+    if (this.god) {
+      this.balls = [];
+      this.state = 'serve';
+      this.serveTimer = 0.2;
+      return;
+    }
     this.lives--;
     this.combo = 0;
     this.timers = zeroTimers();

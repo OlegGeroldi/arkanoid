@@ -2,7 +2,13 @@ import { App, type Scene } from '../app';
 import { ARENA_W, BRICK_H, BRICK_W, COLS, ROWS } from '../core/constants';
 import { BRICK_KINDS, BRICK_ORDER, EMPTY, isBrickCode, type BrickCode } from '../core/bricks';
 import { breakableCount, cloneLevel, emptyRows, getCell, normalizeLevel, setCell, type LevelData } from '../core/level';
-import { deleteUserLevel, loadUserLevels, newLevelId, upsertUserLevel } from '../core/storage';
+import {
+  deleteUserLevel,
+  loadUserLevels,
+  newLevelId,
+  setCampaignOverride,
+  upsertUserLevel,
+} from '../core/storage';
 import { Backdrop } from '../render/backdrop';
 import { soloScene } from '../game/campaign';
 import { mainMenu } from '../ui/menu';
@@ -37,6 +43,7 @@ export function editorScene(app: App, initial?: LevelData): Scene {
       bg: 0,
     } satisfies LevelData);
 
+  let campaignIndex = 0;
   let tool: Tool = 'brush';
   let paint: BrickCode = 'n';
   let painting = false;
@@ -315,6 +322,8 @@ export function editorScene(app: App, initial?: LevelData): Scene {
               button('Импорт JSON', importLevel, 'btn small'),
             ),
 
+            app.profile.admin ? adminCampaignSection() : null,
+
             el('h3', { style: 'margin-top:12px' }, `Мои уровни (${userLevels.length})`),
             el(
               'div',
@@ -349,6 +358,84 @@ export function editorScene(app: App, initial?: LevelData): Scene {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /** Admin-only: pull any campaign level in, edit it and store the result as an
+   *  override. Generated levels come from a seed, so an edit cannot live in the
+   *  generator — it has to sit on top of it. */
+  function adminCampaignSection(): HTMLElement {
+    const levels = app.campaignLevels();
+    const edited = Object.keys(app.store.campaignOverrides).length;
+
+    return el(
+      'div',
+      { class: 'col', style: 'gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,95,162,0.3)' },
+      el(
+        'div',
+        { class: 'row between' },
+        el('h3', { style: 'margin:0;color:var(--pink)' }, 'Уровни кампании'),
+        el('span', { class: 'pill pink' }, `правок: ${edited}`),
+      ),
+      el(
+        'label',
+        { class: 'field' },
+        'Номер уровня',
+        el('input', {
+          type: 'number',
+          min: '1',
+          max: String(levels.length),
+          value: String(campaignIndex + 1),
+          onchange: (e: Event) => {
+            const n = Number((e.target as HTMLInputElement).value) || 1;
+            campaignIndex = Math.min(Math.max(n - 1, 0), levels.length - 1);
+            render();
+          },
+        }),
+      ),
+      el('p', { class: 'hint', style: 'margin:0' }, `${levels[campaignIndex].name}${app.store.campaignOverrides[String(campaignIndex)] ? ' · изменён' : ''}`),
+      el(
+        'div',
+        { class: 'row', style: 'gap:6px' },
+        button(
+          'Загрузить',
+          () => {
+            level = cloneLevel(levels[campaignIndex]);
+            undoStack = [];
+            redoStack = [];
+            toast(`Загружен уровень ${campaignIndex + 1}`);
+            render();
+          },
+          'btn small',
+        ),
+        button(
+          'Записать в кампанию',
+          () => {
+            if (breakableCount(level) === 0) {
+              toast('Нужен хотя бы один разрушаемый кирпич');
+              return;
+            }
+            const saved = { ...cloneLevel(level), id: `campaign-${campaignIndex + 1}` };
+            setCampaignOverride(app.store, campaignIndex, saved);
+            app.commitStore();
+            toast(`Уровень ${campaignIndex + 1} заменён`);
+            render();
+          },
+          'btn small primary',
+        ),
+        app.store.campaignOverrides[String(campaignIndex)]
+          ? button(
+              'Сброс',
+              () => {
+                setCampaignOverride(app.store, campaignIndex, null);
+                app.commitStore();
+                toast('Возвращён исходный уровень');
+                render();
+              },
+              'btn small danger',
+            )
+          : null,
       ),
     );
   }

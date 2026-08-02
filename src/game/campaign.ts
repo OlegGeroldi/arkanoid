@@ -1,17 +1,18 @@
 import { App, fitBox, type Scene } from '../app';
-import { ARENA_H, ARENA_W } from '../core/constants';
+import { ARENA_H, ARENA_W, ENERGY_MAX } from '../core/constants';
+import type { BallTypeId } from '../core/balls';
 import { Arena, noInput } from '../core/arena';
 import type { LevelData } from '../core/level';
 import type { SuperId } from '../core/supers';
 import { ArenaFx } from '../render/fx';
-import { drawArena, drawHud } from '../render/renderer';
+import { drawArena, drawDebug, drawHud } from '../render/renderer';
 import { SOLO_KEYS } from './input';
 import { edgeOnce, FixedStepper } from './stepper';
 import { el, button } from '../ui/dom';
 import { mainMenu } from '../ui/menu';
 import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
-import { SPEED_CHOICES } from '../core/storage';
+import { SPEED_CHOICES, type RunSave } from '../core/storage';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -34,13 +35,30 @@ export interface SoloOptions {
   lives?: number;
   /** Simulation speed multiplier: everything in the arena runs this much faster. */
   speed?: number;
+  /** Resume a saved run instead of starting fresh. */
+  resume?: RunSave;
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
   const levels = opts.levels.length ? opts.levels : [];
-  let index = Math.min(Math.max(opts.startIndex ?? 0, 0), Math.max(levels.length - 1, 0));
-  let speed = opts.speed ?? 1;
-  let arena = new Arena({ level: levels[index], superId: opts.superId, mode: 'solo', lives: opts.lives });
+  const resume = opts.resume;
+  let index = Math.min(
+    Math.max(resume?.levelIndex ?? opts.startIndex ?? 0, 0),
+    Math.max(levels.length - 1, 0),
+  );
+  let speed = resume?.speed ?? opts.speed ?? 1;
+  let arena = new Arena({
+    level: levels[index],
+    superId: resume?.superId ?? opts.superId,
+    mode: 'solo',
+    lives: resume?.lives ?? opts.lives,
+    stats: resume?.stats,
+    perksTaken: resume ? new Map(resume.perks) : undefined,
+    xpTotal: resume?.xpTotal,
+    xpLevel: resume?.xpLevel,
+    score: resume?.score,
+  });
+  if (resume) arena.xpEarned = resume.xpEarned;
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
   let layout = { scale: 1, ox: 0, oy: 0 };
@@ -49,6 +67,8 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   /** True while the between-levels panel is on screen: it must be built once,
    *  or rebuilding it every frame would swallow the click on its buttons. */
   let panelOpen = false;
+  let debugOverlay = false;
+  let cheatBall: BallTypeId = 'void';
   let t = 0;
   const exit = opts.onExit ?? mainMenu;
   music.setScene('game');
@@ -69,6 +89,34 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     if (!opts.trackProgress) return;
     app.saveProfile((p) => {
       p.campaignReached = Math.max(p.campaignReached, index + 1);
+    });
+  }
+
+  /** Autosave. Only ever called between levels, where no ball is in flight and
+   *  the run state is unambiguous. */
+  function writeSave(): void {
+    if (!opts.trackProgress) return;
+    app.saveProfile((p) => {
+      p.save = {
+        levelIndex: index,
+        lives: arena.lives,
+        score: arena.score,
+        xpTotal: arena.xpTotal,
+        xpLevel: arena.xpLevel,
+        xpEarned: arena.xpEarned,
+        superId: arena.superId,
+        stats: arena.stats,
+        perks: [...arena.perksTaken],
+        speed,
+        savedAt: Date.now(),
+      };
+    });
+  }
+
+  function clearSave(): void {
+    if (!opts.trackProgress) return;
+    app.saveProfile((p) => {
+      p.save = null;
     });
   }
 
@@ -116,6 +164,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     arena.energy = Math.min(100, arena.energy);
     fx = new ArenaFx();
     markReached();
+    writeSave();
     clearPanel();
   }
 
@@ -147,6 +196,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     app.saveProfile((p) => {
       p.campaignCleared = Math.max(p.campaignCleared, levels.length);
     });
+    clearSave();
     panel('ПОБЕДА', '#ffd24d', [
       `Все уровни пройдены. Счёт: ${arena.score}.`,
       `Опыт забега: ${Math.round(arena.xpEarned)} — зачислен в профиль.`,
@@ -157,13 +207,51 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     if (finished) return;
     finished = true;
     bank();
+    const saved = opts.trackProgress ? app.profile.save : null;
     panel('ЗАБЕГ ОКОНЧЕН', '#ff4d6d', [
       `Уровень ${index + 1} из ${levels.length}. Счёт: ${arena.score}.`,
       `Опыт забега: ${Math.round(arena.xpEarned)} — зачислен в профиль.`,
-    ], [
-      button('Ещё раз', () => app.setScene((a) => soloScene(a, opts)), 'btn primary'),
+      saved ? `Автосохранение цело: уровень ${saved.levelIndex + 1}.` : '',
+    ].filter(Boolean), [
+      saved
+        ? button(
+            `С уровня ${saved.levelIndex + 1}`,
+            () => app.setScene((a) => soloScene(a, { ...opts, resume: saved })),
+            'btn primary',
+          )
+        : null,
+      button('Заново', () => app.setScene((a) => soloScene(a, { ...opts, resume: undefined, startIndex: 0 }))),
       button('В меню', () => app.setScene(exit)),
-    ]);
+    ].filter((b): b is HTMLButtonElement => b !== null));
+  }
+
+  /** Admin-only cheats and the debug overlay. Ignored for normal profiles. */
+  function adminKeys(): void {
+    const input = app.input;
+    if (input.wasPressed(['KeyG'])) {
+      arena.god = !arena.god;
+      fx.text(240, 330, arena.god ? 'БЕССМЕРТИЕ ВКЛ' : 'БЕССМЕРТИЕ ВЫКЛ', '#3ddc84');
+    }
+    if (input.wasPressed(['KeyH'])) {
+      arena.lives++;
+      fx.text(240, 356, '+1 ЖИЗНЬ', '#ff5fa2');
+    }
+    if (input.wasPressed(['KeyJ'])) {
+      arena.energy = ENERGY_MAX;
+      fx.text(240, 382, 'СУПЕР ЗАРЯЖЕН', '#b06bff');
+    }
+    if (input.wasPressed(['KeyK'])) {
+      arena.clearField();
+      fx.text(240, 408, 'УРОВЕНЬ ПРОПУЩЕН', '#ffd24d');
+    }
+    if (input.wasPressed(['KeyL'])) {
+      const ids: BallTypeId[] = ['lava', 'aqua', 'laser', 'plasma', 'void'];
+      const next = ids[(ids.indexOf(cheatBall) + 1) % ids.length];
+      cheatBall = next;
+      if (arena.balls.length === 0) arena.addBall();
+      arena.setBallType(next);
+    }
+    if (input.wasPressed(['KeyO'])) debugOverlay = !debugOverlay;
   }
 
   /** In-run speed toggle, so a slow level can be sped up without restarting. */
@@ -218,6 +306,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       t += dt;
       if (app.input.wasPressed(['Escape']) && !finished && arena.state !== 'cleared') togglePause();
       if (app.input.wasPressed(['KeyF'])) cycleSpeed();
+      if (app.profile.admin) adminKeys();
       fx.update(dt);
       if (paused || finished) return;
 
@@ -255,6 +344,15 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
         subtitle: `${arena.level.name} · ${index + 1}/${levels.length}${speed > 1 ? ` · ×${speed}` : ''}`,
         fps: app.fps,
       });
+
+      if (debugOverlay && app.profile.admin) {
+        drawDebug(ctx, arena, ARENA_W + GAP + 8, 300, {
+          fps: app.fps.toFixed(0),
+          speed: `x${speed}`,
+          level: `${index + 1}/${levels.length}`,
+          save: app.profile.save ? `lvl ${app.profile.save.levelIndex + 1}` : 'none',
+        });
+      }
       ctx.restore();
     },
 

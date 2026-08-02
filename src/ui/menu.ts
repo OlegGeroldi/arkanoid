@@ -1,12 +1,16 @@
 import { App, type Scene } from '../app';
-import { CAMPAIGN_LEVELS, CAMPAIGN_SIZE, CHAOS_FROM, levelTier } from '../core/campaignLevels';
+import { CAMPAIGN_SIZE, CHAOS_FROM, levelTier } from '../core/campaignLevels';
 import type { LevelData } from '../core/level';
 import {
   accountLevel,
+  addProfile,
   isSuperUnlocked,
   loadUserLevels,
+  removeProfile,
   LIVES_CHOICES,
+  MAX_PROFILES,
   SPEED_CHOICES,
+  type Profile,
 } from '../core/storage';
 import { SUPER_LIST, SUPERS, type SuperId } from '../core/supers';
 import { Backdrop } from '../render/backdrop';
@@ -44,6 +48,18 @@ export function mainMenu(app: App): Scene {
 
         el(
           'div',
+          { class: 'row between', style: 'margin-bottom:16px' },
+          el(
+            'div',
+            { class: 'row', style: 'gap:8px' },
+            el('span', { class: 'pill' }, `Игрок: ${app.profile.name}`),
+            app.profile.admin ? el('span', { class: 'pill pink' }, 'админ') : null,
+          ),
+          button('Сменить игрока', screenProfiles, 'btn small ghost'),
+        ),
+
+        el(
+          'div',
           { class: 'row between', style: 'margin-bottom:22px;gap:20px' },
           el(
             'div',
@@ -74,8 +90,27 @@ export function mainMenu(app: App): Scene {
         el(
           'div',
           { class: 'grid c3' },
+          app.profile.save
+            ? modeCard(
+                '▶',
+                'Продолжить забег',
+                `Уровень ${app.profile.save.levelIndex + 1} · счёт ${app.profile.save.score} · жизней ${app.profile.save.lives}`,
+                () => {
+                  const save = app.profile.save!;
+                  app.setScene((a) =>
+                    soloScene(a, {
+                      levels: app.campaignLevels(),
+                      superId: save.superId,
+                      title: 'Кампания',
+                      trackProgress: true,
+                      resume: save,
+                    }),
+                  );
+                },
+              )
+            : null,
           modeCard('🎯', 'Кампания', `${CAMPAIGN_SIZE} уровней: с ${CHAOS_FROM}-го — хаос и хардкор`, () =>
-            screenSolo(CAMPAIGN_LEVELS, 'Кампания', { campaign: true }),
+            screenSolo(app.campaignLevels(), 'Кампания', { campaign: true }),
           ),
           modeCard('🗺', 'Выбор уровня', `Начать с любого из ${CAMPAIGN_SIZE} уровней кампании`, () => screenLevelSelect()),
           modeCard(
@@ -132,13 +167,129 @@ export function mainMenu(app: App): Scene {
     return grid;
   }
 
+  // --------------------------------------------------------------- profiles --
+
+  function profileCard(p: Profile, isAdminViewer: boolean): HTMLElement {
+    const acc = accountLevel(p);
+    const active = p.id === app.store.activeId;
+
+    return el(
+      'div',
+      { class: `card${active ? ' selected' : ''}` },
+      el(
+        'div',
+        { class: 'title', onclick: () => { app.switchProfile(p.id); sfx.play('ui'); screenMain(); } },
+        el('span', { class: 'icon' }, p.admin ? '★' : '●'),
+        p.name,
+        active ? el('span', { class: 'pill' }, 'активен') : null,
+      ),
+      el(
+        'div',
+        { class: 'desc' },
+        `Уровень ${acc.level} · опыт ${Math.round(p.totalXp)} · кампания ${p.campaignReached}/${CAMPAIGN_SIZE}`,
+      ),
+      el(
+        'div',
+        { class: 'desc' },
+        p.save ? `Автосохранение: уровень ${p.save.levelIndex + 1}, счёт ${p.save.score}` : 'Сохранённого забега нет',
+      ),
+      isAdminViewer
+        ? el(
+            'div',
+            { class: 'row', style: 'gap:6px;margin-top:8px' },
+            el('input', {
+              type: 'text',
+              value: p.name,
+              style: 'max-width:150px',
+              onchange: (e: Event) => {
+                const name = (e.target as HTMLInputElement).value.trim().slice(0, 24);
+                if (!name) return;
+                app.commitStore(() => (p.name = name));
+                screenProfiles();
+              },
+            }),
+            button(
+              'Сбросить',
+              () => {
+                app.commitStore(() => {
+                  p.totalXp = 0;
+                  p.campaignReached = 1;
+                  p.campaignCleared = 0;
+                  p.bestScore = 0;
+                  p.runs = 0;
+                  p.save = null;
+                });
+                screenProfiles();
+              },
+              'btn small',
+            ),
+            app.store.players.length > 1
+              ? button(
+                  'Удалить',
+                  () => {
+                    removeProfile(app.store, p.id);
+                    screenProfiles();
+                  },
+                  'btn small danger',
+                )
+              : null,
+          )
+        : null,
+    );
+  }
+
+  function screenProfiles(): void {
+    const viewerIsAdmin = app.profile.admin;
+    const nameInput = el('input', { type: 'text', placeholder: 'Имя игрока', style: 'max-width:220px' });
+
+    const create = (): void => {
+      const created = addProfile(app.store, nameInput.value || `Игрок ${app.store.players.length + 1}`);
+      if (!created) return;
+      sfx.play('powerup');
+      screenProfiles();
+    };
+
+    show(
+      el(
+        'div',
+        { class: 'screen' },
+        el('h2', {}, 'Игроки'),
+        el(
+          'p',
+          { class: 'hint' },
+          `До ${MAX_PROFILES} профилей. У каждого свой уровень, суперы, настройки и один автосохраняемый забег — он пишется после каждого пройденного уровня.`,
+        ),
+
+        el('div', { class: 'grid c2', style: 'margin-top:14px' }, ...app.store.players.map((p) => profileCard(p, viewerIsAdmin))),
+
+        app.store.players.length < MAX_PROFILES
+          ? el(
+              'div',
+              { class: 'row', style: 'margin-top:16px' },
+              nameInput,
+              button('Создать игрока', create, 'btn small primary'),
+            )
+          : el('p', { class: 'hint', style: 'margin-top:16px' }, `Достигнут предел в ${MAX_PROFILES} профилей.`),
+
+        el(
+          'div',
+          { class: 'row', style: 'margin-top:20px' },
+          button('Назад', screenMain, 'btn ghost'),
+          !viewerIsAdmin
+            ? el('span', { class: 'hint' }, 'Переименование и удаление доступны админскому профилю.')
+            : null,
+        ),
+      ),
+    );
+  }
+
   // ----------------------------------------------------------- level select --
 
   function screenLevelSelect(): void {
     const reached = app.profile.campaignReached;
     const grid = el('div', { class: 'level-grid' });
 
-    CAMPAIGN_LEVELS.forEach((level, i) => {
+    app.campaignLevels().forEach((level, i) => {
       const tier = levelTier(i);
       const best = i + 1 <= reached;
       grid.append(
@@ -149,7 +300,7 @@ export function mainMenu(app: App): Scene {
             title: `${level.name} · скорость мяча ${(level.ballSpeed ?? 1).toFixed(2)}×`,
             onclick: () => {
               sfx.play('ui');
-              screenSolo(CAMPAIGN_LEVELS, `Кампания · ${i + 1}`, { campaign: true, startIndex: i });
+              screenSolo(app.campaignLevels(), `Кампания · ${i + 1}`, { campaign: true, startIndex: i });
             },
           },
           String(i + 1),
@@ -281,7 +432,7 @@ export function mainMenu(app: App): Scene {
 
   function screenVersus(kind: 'split' | 'duel'): void {
     const userLevels = loadUserLevels();
-    const pool = [...CAMPAIGN_LEVELS, ...userLevels];
+    const pool = [...app.campaignLevels(), ...userLevels];
     let p1: SuperId = app.profile.favouriteSuper;
     let p2: SuperId = app.profile.p2Super;
     let levelIndex = 2;
