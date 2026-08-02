@@ -167,6 +167,30 @@ function breakSteelRows(grid: string[][], rows: number): void {
   }
 }
 
+/** A regenerator boxed in by indestructible neighbours is a level that never
+ *  ends: it revives faster than a ball can reach it. Open one wall. */
+function openRegeneratorPockets(grid: string[][], rows: number): void {
+  const at = (c: number, r: number): string => (c < 0 || c >= COLS || r < 0 || r >= rows ? '.' : grid[r][c]);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (grid[r][c] !== 'r') continue;
+      const sides: [number, number][] = [
+        [c - 1, r],
+        [c + 1, r],
+        [c, r - 1],
+        [c, r + 1],
+      ];
+      const walls = sides.filter(([sc, sr]) => at(sc, sr) === 'x');
+      if (walls.length < sides.filter(([sc, sr]) => at(sc, sr) !== '.').length) continue;
+      if (!walls.length) continue;
+      // Every reachable side is a wall — turn one of them into a normal brick.
+      const [wc, wr] = walls[0];
+      grid[wr][wc] = 'n';
+    }
+  }
+}
+
 const CHAOS_NAMES = [
   'Аномалия',
   'Разлом',
@@ -211,12 +235,16 @@ export function generateLevel(index: number, total: number, seed = 0x9e37, route
   if (recipe.chaos) {
     // Chaos levels stack a second pattern on top and skip symmetry entirely.
     rng.pick(SHAPERS)(rng, grid, { ...recipe, density: recipe.density * 0.6 });
-  } else {
-    symmetrise(grid, recipe.rows);
   }
 
   carveLanes(rng, grid, recipe.rows);
   breakSteelRows(grid, recipe.rows);
+  openRegeneratorPockets(grid, recipe.rows);
+
+  // Symmetry last: carving lanes and opening pockets would otherwise break the
+  // mirror the shapers set up, and a lopsided field reads as sloppy rather than
+  // designed. Chaos levels stay deliberately ragged.
+  if (!recipe.chaos) symmetrise(grid, recipe.rows);
 
   const rows = grid.map((row) => row.join(''));
   const baseName = recipe.chaos

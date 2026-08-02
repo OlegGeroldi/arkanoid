@@ -74,6 +74,7 @@ export function buildBricks(level: LevelData): Brick[] {
         hp: kind.hp,
         alive: true,
         regenTimer: 0,
+        regensLeft: kind.regenLimit ?? 0,
         flash: 0,
       });
     }

@@ -757,8 +757,13 @@ export class Arena {
       for (const b of this.balls) b.baseSpeed = Math.min(BALL_SPEED_MAX, b.baseSpeed + 4);
     }
 
-    if (brick.kind.regen) {
-      brick.regenTimer = brick.kind.regen;
+    // Regenerators wear out: every revival takes longer, and after the last one
+    // the brick stays down. Otherwise a regenerator walled in by indestructible
+    // blocks could keep a level alive forever.
+    if (brick.kind.regen && brick.regensLeft > 0) {
+      const used = (brick.kind.regenLimit ?? 1) - brick.regensLeft;
+      brick.regenTimer = brick.kind.regen * (1 + used * 0.6);
+      brick.regensLeft--;
     }
 
     if (brick.kind.explodes || this.rng.chance(this.stats.explosiveTouch)) {
@@ -1172,10 +1177,19 @@ export class Arena {
       a.tick = 0.18;
       const radius = 84;
       for (const b of this.bricks) {
-        if (!b.alive || b.kind.hp < 0) continue;
+        if (!b.alive) continue;
         const dx = b.x + BRICK_W / 2 - a.x;
         const dy = b.y + BRICK_H / 2 - a.y;
-        if (dx * dx + dy * dy <= radius * radius) this.damageBrick(b, 1);
+        if (dx * dx + dy * dy > radius * radius) continue;
+        if (b.kind.hp < 0) {
+          // A black hole does not care how sturdy a block claims to be. This is
+          // the answer to regenerators sealed inside indestructible pockets.
+          b.alive = false;
+          this.grid[b.row * COLS + b.col] = null;
+          this.events.push({ t: 'brick', x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, color: '#b06bff', big: true });
+        } else {
+          this.damageBrick(b, 1);
+        }
       }
       this.shake = Math.min(1, this.shake + 0.15);
     }
@@ -1224,6 +1238,7 @@ export class Arena {
         hp: kind.hp,
         alive: true,
         regenTimer: 0,
+        regensLeft: 0,
         flash: 1,
       };
       this.bricks.push(brick);

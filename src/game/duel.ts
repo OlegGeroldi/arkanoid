@@ -154,6 +154,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
           hp: kind.hp,
           alive: true,
           regenTimer: 0,
+          regensLeft: 0,
           flash: 0,
         });
       }
@@ -171,6 +172,7 @@ export function duelScene(app: App, opts: DuelOptions): Scene {
             hp: 1,
             alive: true,
             regenTimer: 0,
+            regensLeft: 0,
             flash: 0,
           });
         }
