@@ -15,6 +15,7 @@ import type { Arena } from '../core/arena';
 import { BALL_TYPES } from '../core/balls';
 import { SUPERS } from '../core/supers';
 import { SPEC_LIST, SPECS } from '../core/specialisation';
+import { SKILLS, skillCooldown } from '../core/skills';
 import type { ArenaFx } from './fx';
 import { clamp } from '../core/math';
 
@@ -66,6 +67,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, arena: Arena, fx: Arena
   drawLasers(ctx, arena);
   drawPaddle(ctx, arena, t);
   drawBalls(ctx, arena, t);
+  drawSkillEffects(ctx, arena, t);
   drawShield(ctx, arena);
   fx.draw(ctx);
   drawHazards(ctx, arena, t);
@@ -303,6 +305,62 @@ function drawLasers(ctx: CanvasRenderingContext2D, arena: Arena): void {
   ctx.restore();
 }
 
+/** Skill visuals that live inside the playfield: fireballs, the ghost paddle,
+ *  the drone and the barrier floor. */
+function drawSkillEffects(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void {
+  for (const f of arena.fireballs) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createRadialGradient(f.x, f.y, 2, f.x, f.y, f.rank >= 2 ? 26 : 16);
+    grad.addColorStop(0, '#fff4d0');
+    grad.addColorStop(0.4, '#ff9a4d');
+    grad.addColorStop(1, 'rgba(255,106,43,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(f.x - 30, f.y - 30, 60, 60);
+    ctx.restore();
+  }
+
+  if (arena.timers.ghost > 0) {
+    const gx = ARENA_W - arena.paddleX;
+    ctx.save();
+    ctx.globalAlpha = 0.45 + Math.sin(t * 6) * 0.1;
+    neonRect(ctx, gx - arena.paddleW / 2, PADDLE_Y, arena.paddleW, PADDLE_H, '#7c6cff', 6, 14);
+    ctx.restore();
+  }
+
+  if (arena.timers.drone > 0) {
+    ctx.save();
+    ctx.fillStyle = '#ffd24d';
+    ctx.shadowColor = '#ffd24d';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(arena.paddleX, PADDLE_Y - 26 + Math.sin(t * 5) * 3, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (arena.timers.barrier > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.35 + Math.sin(t * 8) * 0.12;
+    const g = ctx.createLinearGradient(0, ARENA_H - 26, 0, ARENA_H);
+    g.addColorStop(0, 'rgba(61,220,132,0)');
+    g.addColorStop(1, 'rgba(61,220,132,0.85)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, ARENA_H - 26, ARENA_W, 26);
+    ctx.restore();
+  }
+
+  if (arena.hammerHits > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#ff7a3d';
+    ctx.font = `800 12px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`МОЛОТ ×${arena.hammerHits}`, ARENA_W / 2, PADDLE_Y - 30);
+    ctx.restore();
+  }
+}
+
 function drawShield(ctx: CanvasRenderingContext2D, arena: Arena): void {
   if (arena.shields <= 0) return;
   const y = ARENA_H - 14;
@@ -397,12 +455,12 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
     ctx.font = `500 13px ${FONT}`;
     ctx.fillText('Выберите усиление', ARENA_W / 2, 174);
 
-    arena.draft.forEach((perk, i) => {
+    const drawCard = (i: number, icon: string, title: string, desc: string, accent: string): void => {
       const y = 210 + i * 108;
       const x = 40;
       const w = ARENA_W - 80;
       ctx.fillStyle = 'rgba(20,28,54,0.95)';
-      ctx.strokeStyle = 'rgba(77,226,255,0.5)';
+      ctx.strokeStyle = withAlpha(accent, 0.5);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.roundRect(x, y, w, 92, 10);
@@ -410,20 +468,35 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
       ctx.stroke();
 
       ctx.textAlign = 'left';
-      ctx.fillStyle = '#4de2ff';
+      ctx.fillStyle = accent;
       ctx.font = `800 26px ${FONT}`;
-      ctx.fillText(perk.icon, x + 18, y + 56);
+      ctx.fillText(icon, x + 18, y + 56);
       ctx.fillStyle = '#ffffff';
       ctx.font = `700 17px ${FONT}`;
-      ctx.fillText(perk.name, x + 58, y + 38);
+      ctx.fillText(title, x + 58, y + 38);
       ctx.fillStyle = 'rgba(255,255,255,0.65)';
       ctx.font = `500 13px ${FONT}`;
-      ctx.fillText(perk.desc, x + 58, y + 60);
+      wrapText(ctx, desc, x + 58, y + 60, w - 76, 15);
       ctx.fillStyle = 'rgba(255,210,77,0.9)';
       ctx.font = `800 14px ${FONT}`;
       ctx.textAlign = 'right';
       ctx.fillText(`[${i + 1}]`, x + w - 16, y + 30);
-    });
+      ctx.textAlign = 'left';
+    };
+
+    arena.draft.forEach((perk, i) => drawCard(i, perk.icon, perk.name, perk.desc, '#4de2ff'));
+
+    if (arena.draftSkill) {
+      const def = SKILLS[arena.draftSkill.id];
+      const rankText = def.ranks[arena.draftSkill.toRank - 2] ?? '';
+      drawCard(
+        arena.draft.length,
+        def.icon,
+        `${def.name} — ранг ${arena.draftSkill.toRank}`,
+        rankText,
+        def.color,
+      );
+    }
 
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
@@ -616,6 +689,60 @@ export function drawHud(
     ctx.textAlign = 'left';
   }
   cy += 30;
+
+  // Active skills: a radial dial per slot, filled while it recharges.
+  if (arena.skills.length) {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText('СКИЛЛЫ', pad, cy);
+    cy += 6;
+    arena.skills.forEach((slot, i) => {
+      const def = SKILLS[slot.id];
+      const total = skillCooldown(def, slot.rank);
+      const ready = slot.cd <= 0;
+      const cx = pad + 18 + i * 96;
+      const cyy = cy + 18;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cyy, 15, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fill();
+      if (!ready) {
+        // Sweep shows how much of the cooldown is left.
+        ctx.beginPath();
+        ctx.moveTo(cx, cyy);
+        ctx.arc(cx, cyy, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - slot.cd / total));
+        ctx.closePath();
+        ctx.fillStyle = withAlpha(def.color, 0.25);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = def.color;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = def.color;
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.fillStyle = ready ? def.color : 'rgba(255,255,255,0.35)';
+      ctx.font = `800 15px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(def.icon, cx, cyy + 5);
+      ctx.font = `600 9px ${FONT}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillText(i === 0 ? 'Q' : 'E', cx, cyy + 27);
+      ctx.textAlign = 'left';
+
+      ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.45)';
+      ctx.font = `700 11px ${FONT}`;
+      ctx.fillText(`${def.name}`, cx + 22, cyy - 2);
+      ctx.fillStyle = withAlpha(def.color, 0.85);
+      ctx.font = `600 10px ${FONT}`;
+      ctx.fillText(ready ? `ранг ${slot.rank} · готов` : `${slot.cd.toFixed(1)} с`, cx + 22, cyy + 12);
+    });
+    cy += 52;
+  }
 
   // Score + combo
   ctx.fillStyle = '#ffffff';

@@ -5,6 +5,8 @@ export interface Bindings {
   right: string[];
   action: string[];
   super: string[];
+  /** Active skill slots 1 and 2. */
+  skills: [string[], string[]];
   picks: [string[], string[], string[]];
   /** Solo/campaign only: the mouse steers the paddle. */
   mouse?: boolean;
@@ -14,7 +16,8 @@ export const SOLO_KEYS: Bindings = {
   left: ['ArrowLeft', 'KeyA'],
   right: ['ArrowRight', 'KeyD'],
   action: ['Space', 'KeyW', 'ArrowUp'],
-  super: ['ShiftLeft', 'ShiftRight', 'KeyE'],
+  super: ['ShiftLeft', 'ShiftRight'],
+  skills: [['KeyQ'], ['KeyE']],
   picks: [['Digit1', 'Numpad1'], ['Digit2', 'Numpad2'], ['Digit3', 'Numpad3']],
   mouse: true,
 };
@@ -23,7 +26,8 @@ export const P1_KEYS: Bindings = {
   left: ['KeyA'],
   right: ['KeyD'],
   action: ['KeyW'],
-  super: ['KeyS', 'KeyQ'],
+  super: ['KeyS'],
+  skills: [['KeyQ'], ['KeyE']],
   picks: [['Digit1'], ['Digit2'], ['Digit3']],
 };
 
@@ -32,6 +36,7 @@ export const P2_KEYS: Bindings = {
   right: ['ArrowRight'],
   action: ['ArrowUp'],
   super: ['ArrowDown', 'Slash'],
+  skills: [['Comma'], ['Period']],
   picks: [
     ['Digit8', 'Numpad1'],
     ['Digit9', 'Numpad2'],
@@ -181,9 +186,14 @@ export class InputHub {
     const right = this.isDown(b.right);
     const useMouse = b.mouse === true && this.pointerOwns && !left && !right;
 
+    let skill: 0 | 1 | 2 = 0;
+    if (this.wasPressed(b.skills[0])) skill = 1;
+    else if (this.wasPressed(b.skills[1])) skill = 2;
+
     return {
       left,
       right,
+      skill,
       pointer: useMouse ? pointerArenaX : null,
       actionPressed: this.wasPressed(b.action) || (b.mouse === true && this.clicked),
       superPressed: this.wasPressed(b.super),

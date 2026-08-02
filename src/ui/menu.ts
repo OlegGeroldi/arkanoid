@@ -6,6 +6,7 @@ import {
   addProfile,
   isSuperUnlocked,
   loadUserLevels,
+  isSkillUnlocked,
   removeProfile,
   ngBallSpeedMul,
   ngXpMul,
@@ -24,11 +25,15 @@ import { button, el } from './dom';
 import { music } from '../audio/music';
 import { sfx } from '../audio/sfx';
 import { BALL_TYPE_LIST } from '../core/balls';
+import { SKILL_LIST, SKILL_SLOTS } from '../core/skills';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
 export function mainMenu(app: App): Scene {
   const backdrop = new Backdrop();
+  /** Which skill slot the next pick fills, and a hook to redraw the setup screen. */
+  let editingSlot = 0;
+  let renderSolo: (() => void) | null = null;
 
   const show = (...nodes: HTMLElement[]): void => {
     app.overlay.classList.add('interactive');
@@ -171,6 +176,51 @@ export function mainMenu(app: App): Scene {
         el('div', { class: 'desc', style: 'color:rgba(255,95,162,0.8)' }, `PvP: ${def.pvp}`),
       );
       grid.append(card);
+    }
+    return grid;
+  }
+
+  // ---------------------------------------------------------- skill picker --
+
+  /** Two slots; clicking a skill puts it in the slot being edited. */
+  function skillPicker(): HTMLElement {
+    const equipped = app.profile.skills;
+    const grid = el('div', { class: 'grid c3' });
+
+    for (const def of SKILL_LIST) {
+      const locked = !isSkillUnlocked(app.profile, def.id);
+      const slot = equipped.indexOf(def.id);
+      grid.append(
+        el(
+          'div',
+          {
+            class: `card${slot >= 0 ? ' selected' : ''}${locked ? ' locked' : ''}`,
+            onclick: () => {
+              if (locked) return;
+              const next = [...app.profile.skills];
+              if (slot >= 0) next[slot] = null;
+              else {
+                const free = next.findIndex((s) => s === null);
+                next[free >= 0 ? free : editingSlot] = def.id;
+                editingSlot = (editingSlot + 1) % SKILL_SLOTS;
+              }
+              app.saveProfile((p) => (p.skills = next));
+              sfx.play('ui');
+              renderSolo?.();
+            },
+          },
+          el(
+            'div',
+            { class: 'title', style: `color:${def.color}` },
+            el('span', { class: 'icon' }, def.icon),
+            def.name,
+            slot >= 0 ? el('span', { class: 'pill' }, slot === 0 ? 'Q' : 'E') : null,
+            locked ? el('span', { class: 'pill' }, `с ур. ${def.unlockLevel}`) : null,
+          ),
+          el('div', { class: 'desc' }, def.desc),
+          el('div', { class: 'desc', style: 'opacity:.75' }, `Перезарядка ${def.cooldown} с`),
+        ),
+      );
     }
     return grid;
   }
@@ -347,6 +397,7 @@ export function mainMenu(app: App): Scene {
     if (!isSuperUnlocked(app.profile, chosen)) chosen = 'barrage';
 
     const render = (): void => {
+      renderSolo = render;
       show(
         el(
           'div',
@@ -416,6 +467,10 @@ export function mainMenu(app: App): Scene {
               el('p', { class: 'hint', style: 'margin:6px 0 0' }, 'В игре переключается клавишей F'),
             ),
           ),
+
+          el('h3', { style: 'margin-top:18px' }, 'Активные скиллы'),
+          el('p', { class: 'hint', style: 'margin-top:0' }, 'Два слота: Q и E. Внутри забега скиллы можно поднять до III ранга.'),
+          skillPicker(),
 
           el('h3', { style: 'margin-top:18px' }, 'Суперудар'),
           superPicker(chosen, (id) => {

@@ -1,6 +1,7 @@
 import { App, fitBox, type Scene } from '../app';
 import { ARENA_H, ARENA_W, ENERGY_MAX } from '../core/constants';
 import type { BallTypeId } from '../core/balls';
+import type { SkillId } from '../core/skills';
 import { Arena, noInput } from '../core/arena';
 import type { LevelData } from '../core/level';
 import type { SuperId } from '../core/supers';
@@ -42,6 +43,8 @@ export interface SoloOptions {
   resume?: RunSave;
   /** New Game+ cycle this run belongs to: harder levels, richer XP. */
   ngPlus?: number;
+  /** Abilities to equip; defaults to the profile's loadout. */
+  skills?: (SkillId | null)[];
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
@@ -74,6 +77,8 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     arena.xpEarned = resume.xpEarned;
     arena.spec = resume.spec ?? null;
   }
+  const skillRanks: Partial<Record<SkillId, number>> = Object.fromEntries(resume?.skillRanks ?? []);
+  arena.equipSkills(opts.skills ?? app.profile.skills, skillRanks);
   applyRoute();
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
@@ -133,6 +138,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
         speed,
         spec: arena.spec,
         routes: [...routes],
+        skillRanks: arena.skills.map((s) => [s.id, s.rank] as [SkillId, number]),
         savedAt: Date.now(),
       };
     });
@@ -184,9 +190,12 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     };
     const xpEarned = arena.xpEarned;
     const spec = arena.spec;
+    const ranks = Object.fromEntries(arena.skills.map((s) => [s.id, s.rank])) as Partial<Record<SkillId, number>>;
+    const equipped = arena.skills.map((s) => s.id);
     arena = new Arena(carry);
     arena.xpEarned = xpEarned;
     arena.spec = spec;
+    arena.equipSkills(equipped, ranks);
     arena.xpInto = 0;
     applyRoute();
     arena.energy = Math.min(100, arena.energy);

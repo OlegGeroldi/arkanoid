@@ -36,6 +36,7 @@ import { Rng } from './rng';
 import { BRICK_KINDS, type Brick } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
 import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
+import { MAX_RANK, SKILLS, SKILL_SLOTS, skillCooldown, skillDuration, type SkillId } from './skills';
 import { buildBricks, breakableCount, type LevelData } from './level';
 import { POWERUP_LIST, POWERUPS, type FallingPowerup, type PowerupId } from './powerups';
 import { SUPERS, type SuperId } from './supers';
@@ -79,6 +80,7 @@ export type ArenaEvent =
   | { t: 'super'; id: SuperId }
   | { t: 'ballType'; id: BallTypeId }
   | { t: 'spec'; id: SpecId }
+  | { t: 'skill'; id: SkillId; rank: number }
   | { t: 'attack'; power: number }
   | { t: 'cleared' }
   | { t: 'dead' }
@@ -94,6 +96,8 @@ export interface ArenaInput {
   superPressed: boolean;
   /** Perk draft choice 1..3, edge-triggered. */
   pick: 0 | 1 | 2 | 3;
+  /** Active skill slot fired this frame: 1 or 2, edge-triggered. */
+  skill: 0 | 1 | 2;
 }
 
 export const noInput = (): ArenaInput => ({
@@ -103,6 +107,7 @@ export const noInput = (): ArenaInput => ({
   actionPressed: false,
   superPressed: false,
   pick: 0,
+  skill: 0,
 });
 
 export interface ArenaOptions {
@@ -131,6 +136,29 @@ interface Timers {
   invert: number;
   fog: number;
   haste: number;
+  /** Active-skill effects. */
+  magnetSkill: number;
+  barrier: number;
+  stasis: number;
+  ghost: number;
+  drone: number;
+}
+
+/** One equipped ability: what it is, how far it is upgraded, and how long until
+ *  it can be used again. */
+export interface SkillSlot {
+  id: SkillId;
+  rank: number;
+  cd: number;
+  /** Remaining effect time, for the skills that have one. */
+  activeT: number;
+}
+
+export interface Fireball {
+  x: number;
+  y: number;
+  vy: number;
+  rank: number;
 }
 
 const zeroTimers = (): Timers => ({
@@ -144,6 +172,11 @@ const zeroTimers = (): Timers => ({
   invert: 0,
   fog: 0,
   haste: 0,
+  magnetSkill: 0,
+  barrier: 0,
+  stasis: 0,
+  ghost: 0,
+  drone: 0,
 });
 
 export interface SuperState {
@@ -184,6 +217,8 @@ export class Arena {
   stats: RunStats;
   perksTaken = new Map<string, number>();
   draft: Perk[] = [];
+  /** Optional skill upgrade offered alongside the perks, in the last slot. */
+  draftSkill: { id: SkillId; toRank: number } | null = null;
   draftTimer = 0;
   /** Chosen once per run at mastery level 5; tilts every later draft. */
   spec: SpecId | null = null;
@@ -207,6 +242,12 @@ export class Arena {
   active: SuperState | null = null;
 
   timers = zeroTimers();
+  /** Equipped active abilities, up to SKILL_SLOTS of them. */
+  skills: SkillSlot[] = [];
+  fireballs: Fireball[] = [];
+  /** Charges of the hammer buff waiting to be spent on a brick. */
+  hammerHits = 0;
+  droneTick = 0;
   /** Admin cheat: losing the ball costs nothing and it is served straight back. */
   god = false;
   shake = 0;
@@ -267,10 +308,11 @@ export class Arena {
 
     if (this.state === 'levelup') {
       this.draftTimer = Math.max(0, this.draftTimer - dt);
-      if (input.pick > 0 && input.pick <= this.draft.length) {
-        this.pickPerk(input.pick - 1);
-      } else if (this.draftTimer <= 0 && this.draft.length > 0) {
-        this.pickPerk(0);
+      const options = this.draft.length + (this.draftSkill ? 1 : 0);
+      if (input.pick > 0 && input.pick <= options) {
+        this.pickDraft(input.pick - 1);
+      } else if (this.draftTimer <= 0 && options > 0) {
+        this.pickDraft(0);
       }
       return;
     }
@@ -286,10 +328,13 @@ export class Arena {
     }
 
     this.tickTimers(dt);
+    this.tickSkills(dt);
     this.movePaddle(dt, input);
 
     if (input.superPressed) this.fireSuper();
+    if (input.skill > 0) this.useSkill(input.skill);
     this.updateSuper(dt);
+    this.updateFireballs(dt);
 
     if (this.state === 'serve') {
       this.serveTimer -= dt;
@@ -341,6 +386,8 @@ export class Arena {
     if (this.timers.expand > 0) w *= 1.5;
     if (this.timers.shrink > 0) w *= 0.62;
     if (this.active?.id === 'fracture') w *= 1.55;
+    // Stasis III widens the paddle for as long as time is slowed.
+    if (this.timers.stasis > 0 && (this.skills.find((s) => s.id === 'stasis')?.rank ?? 0) >= 3) w *= 1.3;
     return clamp(w, PADDLE_MIN_W, PADDLE_MAX_W);
   }
 
@@ -378,6 +425,7 @@ export class Arena {
 
   private ballSpeedMul(): number {
     let m = this.stats.ballSpeedMul;
+    if (this.timers.stasis > 0) m *= 0.5;
     if (this.timers.slow > 0) m *= 0.65;
     if (this.timers.speed > 0) m *= 1.3;
     if (this.timers.haste > 0) m *= 1.35;
@@ -481,11 +529,16 @@ export class Arena {
       if (ball.trail.length > 9) ball.trail.shift();
 
       if (ball.y - ball.r > ARENA_H) {
-        if (this.shields > 0) {
-          this.shields--;
+        const barrier = this.timers.barrier > 0;
+        if (barrier || this.shields > 0) {
+          if (!barrier) this.shields--;
           ball.y = ARENA_H - 26;
           ball.vy = -Math.abs(ball.vy);
-          this.events.push({ t: 'hit', x: ball.x, y: ARENA_H - 20, color: '#4de2ff' });
+          // Barrier III kicks the ball back up with extra pace.
+          if (barrier && (this.skills.find((s) => s.id === 'barrier')?.rank ?? 0) >= 3) {
+            ball.baseSpeed = Math.min(BALL_SPEED_MAX, ball.baseSpeed * 1.1);
+          }
+          this.events.push({ t: 'hit', x: ball.x, y: ARENA_H - 20, color: barrier ? '#3ddc84' : '#4de2ff' });
         } else {
           this.balls.splice(i, 1);
           this.events.push({ t: 'ballLost', x: ball.x });
@@ -590,6 +643,11 @@ export class Arena {
         let dmg = this.stats.ballDamage + element.damage;
         if (this.stats.critChance > 0 && this.rng.chance(this.stats.critChance)) dmg *= 2;
         if (ball.fireT > 0) dmg += 2;
+        if (this.hammerHits > 0) {
+          this.hammerHits--;
+          dmg *= 5;
+          if ((this.skills.find((s) => s.id === 'hammer')?.rank ?? 0) >= 3) this.explode(brick, 1.4);
+        }
         this.damageBrick(brick, dmg);
         if (ball.fireT > 0) this.explode(brick, 1.1);
         this.elementalImpact(ball, brick);
@@ -753,7 +811,9 @@ export class Arena {
   private updatePowerups(dt: number): void {
     const half = this.paddleW / 2;
     // A void ball drags capsules toward the paddle even without the magnet perk.
-    const magnet = this.stats.magnet + (this.balls.some((b) => b.type === 'void') ? 0.6 : 0);
+    const magnetSkill =
+      this.timers.magnetSkill > 0 ? ((this.skills.find((s) => s.id === 'magnet')?.rank ?? 1) >= 3 ? 2 : 1) : 0;
+    const magnet = this.stats.magnet + (this.balls.some((b) => b.type === 'void') ? 0.6 : 0) + magnetSkill;
 
     for (let i = this.powerups.length - 1; i >= 0; i--) {
       const p = this.powerups[i];
@@ -874,6 +934,176 @@ export class Arena {
         this.damageBrick(brick, this.spec ? SPECS[this.spec].laserDamage ?? 1 : 1);
         this.lasers.splice(i, 1);
       }
+    }
+  }
+
+  // ---------------------------------------------------------------- skills --
+
+  equipSkills(ids: (SkillId | null)[], ranks: Partial<Record<SkillId, number>> = {}): void {
+    this.skills = ids
+      .filter((id): id is SkillId => id !== null)
+      .slice(0, SKILL_SLOTS)
+      .map((id) => ({ id, rank: Math.min(MAX_RANK, Math.max(1, ranks[id] ?? 1)), cd: 0, activeT: 0 }));
+  }
+
+  upgradeSkill(id: SkillId): void {
+    const slot = this.skills.find((s) => s.id === id);
+    if (slot && slot.rank < MAX_RANK) slot.rank++;
+  }
+
+  private tickSkills(dt: number): void {
+    for (const slot of this.skills) {
+      if (slot.cd > 0) slot.cd = Math.max(0, slot.cd - dt);
+      if (slot.activeT > 0) slot.activeT = Math.max(0, slot.activeT - dt);
+    }
+
+    // Drone fires on its own while its timer runs.
+    if (this.timers.drone > 0) {
+      const rank = this.skills.find((s) => s.id === 'drone')?.rank ?? 1;
+      this.droneTick -= dt;
+      if (this.droneTick <= 0) {
+        this.droneTick = rank >= 2 ? 0.28 : 0.55;
+        this.lasers.push({ x: this.paddleX, y: PADDLE_Y - 24, vy: -LASER_SPEED });
+        if (rank >= 3) this.lasers.push({ x: ARENA_W - this.paddleX, y: PADDLE_Y - 24, vy: -LASER_SPEED });
+      }
+    }
+
+    // Ghost paddle mirrors the player and can rescue a ball on the far side.
+    if (this.timers.ghost > 0) {
+      const gx = ARENA_W - this.paddleX;
+      const half = this.paddleW / 2;
+      for (const ball of this.balls) {
+        if (ball.held !== null || ball.vy <= 0) continue;
+        if (ball.y + ball.r < PADDLE_Y || ball.y - ball.r > PADDLE_Y + PADDLE_H) continue;
+        if (Math.abs(ball.x - gx) > half) continue;
+        const off = clamp((ball.x - gx) / half, -1, 1);
+        const angle = off * PADDLE_MAX_BOUNCE;
+        ball.vx = Math.sin(angle);
+        ball.vy = -Math.cos(angle);
+        ball.y = PADDLE_Y - ball.r;
+        this.events.push({ t: 'hit', x: ball.x, y: PADDLE_Y, color: '#7c6cff' });
+      }
+    }
+  }
+
+  private updateFireballs(dt: number): void {
+    for (let i = this.fireballs.length - 1; i >= 0; i--) {
+      const f = this.fireballs[i];
+      f.y += f.vy * dt;
+      if (f.y < -20) {
+        this.fireballs.splice(i, 1);
+        continue;
+      }
+      const radius = f.rank >= 2 ? 1 : 0;
+      const col = Math.floor(f.x / BRICK_W);
+      const row = Math.floor((f.y - GRID_TOP) / BRICK_H);
+      for (let c = col - radius; c <= col + radius; c++) {
+        const brick = this.cellAt(c, row);
+        if (!brick) continue;
+        if (brick.kind.hp < 0) {
+          // Rank III is the only thing in the game that breaks indestructible blocks.
+          if (f.rank >= 3) {
+            brick.alive = false;
+            this.grid[brick.row * COLS + brick.col] = null;
+            this.events.push({ t: 'brick', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: '#ffffff', big: true });
+            this.shake = Math.min(1, this.shake + 0.3);
+          }
+          continue;
+        }
+        this.damageBrick(brick, f.rank >= 2 ? 3 : 1);
+      }
+    }
+  }
+
+  /** Fires the ability in the given slot (1-based), if it is off cooldown. */
+  useSkill(slotIndex: number): void {
+    const slot = this.skills[slotIndex - 1];
+    if (!slot || slot.cd > 0 || this.state !== 'play') return;
+    const def = SKILLS[slot.id];
+    const rank = slot.rank;
+    slot.cd = skillCooldown(def, rank);
+    slot.activeT = skillDuration(def, rank);
+    this.events.push({ t: 'skill', id: slot.id, rank });
+
+    switch (slot.id) {
+      case 'magnet':
+        this.timers.magnetSkill = skillDuration(def, rank);
+        break;
+
+      case 'fireball':
+        this.fireballs.push({ x: this.paddleX, y: PADDLE_Y - 10, vy: -520, rank });
+        break;
+
+      case 'teleport': {
+        const target = this.balls.reduce<Ball | null>((m, b) => (!m || b.y > m.y ? b : m), null);
+        if (target) {
+          this.paddleX = clamp(target.x, WALL + this.paddleW / 2, ARENA_W - WALL - this.paddleW / 2);
+          if (rank >= 2) target.baseSpeed = Math.max(120, target.baseSpeed * 0.85);
+          if (rank >= 3) {
+            target.vx = 0;
+            target.vy = -1;
+          }
+        }
+        break;
+      }
+
+      case 'barrier':
+        this.timers.barrier = skillDuration(def, rank);
+        break;
+
+      case 'stasis':
+        this.timers.stasis = skillDuration(def, rank);
+        break;
+
+      case 'ghost':
+        this.timers.ghost = skillDuration(def, rank);
+        break;
+
+      case 'drone':
+        this.timers.drone = skillDuration(def, rank);
+        this.droneTick = 0;
+        break;
+
+      case 'hammer':
+        this.hammerHits = rank >= 2 ? 3 : 1;
+        break;
+
+      case 'chain': {
+        const live = this.bricks.filter((b) => b.alive && b.kind.hp > 0);
+        const count = rank >= 2 ? 9 : 5;
+        for (const brick of this.rng.shuffled(live).slice(0, count)) {
+          this.damageBrick(brick, 2);
+          this.events.push({ t: 'hit', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: '#c46bff' });
+          if (rank >= 3) this.explode(brick, 1);
+        }
+        break;
+      }
+
+      case 'repair':
+        this.lives += rank >= 3 ? 2 : 1;
+        break;
+
+      case 'rain': {
+        const count = rank >= 2 ? 10 : 6;
+        for (let i = 0; i < count; i++) {
+          const pool = POWERUP_LIST.filter((d) => !d.bad);
+          const def2 = rank >= 3 && i === 0 ? POWERUPS.ballLava : this.rng.pick(pool);
+          this.powerups.push({
+            id: def2.id,
+            def: def2,
+            x: this.rng.range(WALL, ARENA_W - WALL - POWERUP_W),
+            y: -this.rng.range(0, 160),
+            vy: POWERUP_FALL,
+            spin: this.rng.range(0, 6.28),
+          });
+        }
+        break;
+      }
+
+      case 'glue':
+        this.timers.catch = Math.max(this.timers.catch, skillDuration(def, rank));
+        if (rank >= 3) this.stats.ballDamage += 0.25;
+        break;
     }
   }
 
@@ -1034,7 +1264,19 @@ export class Arena {
     }
 
     this.draft = rollPerks(this.rng, this.perksTaken, 3, this.spec ? SPECS[this.spec].favours : []);
-    if (this.draft.length > 0) {
+
+    // An upgradable skill can take one of the three slots in the draft, so the
+    // abilities grow through the same choices as everything else.
+    const upgradable = this.skills.filter((s) => s.rank < MAX_RANK);
+    if (upgradable.length && this.draft.length === 3 && this.rng.chance(0.45)) {
+      const slot = this.rng.pick(upgradable);
+      this.draftSkill = { id: slot.id, toRank: slot.rank + 1 };
+      this.draft.pop();
+    } else {
+      this.draftSkill = null;
+    }
+
+    if (this.draft.length > 0 || this.draftSkill) {
       this.draftTimer = 8;
       this.state = 'levelup';
     }
@@ -1051,6 +1293,19 @@ export class Arena {
     this.state = this.balls.length > 0 ? 'play' : 'serve';
   }
 
+  /** Draft slots are the perks first, then the optional skill upgrade. */
+  pickDraft(index: number): void {
+    if (index === this.draft.length && this.draftSkill) {
+      this.upgradeSkill(this.draftSkill.id);
+      this.events.push({ t: 'skill', id: this.draftSkill.id, rank: this.draftSkill.toRank });
+      this.draft = [];
+      this.draftSkill = null;
+      this.state = this.balls.length > 0 ? 'play' : 'serve';
+      return;
+    }
+    this.pickPerk(index);
+  }
+
   pickPerk(index: number): void {
     const perk = this.draft[index];
     if (!perk) return;
@@ -1061,6 +1316,7 @@ export class Arena {
     if (perk.instant?.balls) this.addBall();
     if (perk.id === 'bulwark') this.shields += 2;
     this.draft = [];
+    this.draftSkill = null;
     this.state = this.balls.length > 0 ? 'play' : 'serve';
   }
 

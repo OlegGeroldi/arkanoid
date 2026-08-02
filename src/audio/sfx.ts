@@ -241,6 +241,9 @@ export class Sfx {
         case 'super':
           this.play('super');
           break;
+        case 'skill':
+          this.play('ballType');
+          break;
         case 'lifeLost':
           this.play('lifeLost');
           break;

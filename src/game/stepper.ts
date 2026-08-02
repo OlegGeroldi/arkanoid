@@ -4,7 +4,7 @@ import type { ArenaInput } from '../core/arena';
 /** Edge-triggered fields must only fire on the first sub-step of a frame,
  *  otherwise one key tap would be consumed several times. */
 export function edgeOnce(input: ArenaInput, first: boolean): ArenaInput {
-  return first ? input : { ...input, actionPressed: false, superPressed: false, pick: 0 };
+  return first ? input : { ...input, actionPressed: false, superPressed: false, pick: 0, skill: 0 };
 }
 
 /** Fixed-timestep driver shared by every mode. `first` is true for the leading

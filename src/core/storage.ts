@@ -3,6 +3,7 @@ import { accountLevelFromXp, baseStats, type RunStats } from './progression';
 import { SUPERS, type SuperId } from './supers';
 import { SPECS, type SpecId } from './specialisation';
 import { ROUTES, type RouteId } from './routes';
+import { SKILLS, SKILL_SLOTS, type SkillId } from './skills';
 
 const LEGACY_PROFILE_KEY = 'neonoid.profile.v1';
 const LEVELS_KEY = 'neonoid.levels.v1';
@@ -30,6 +31,8 @@ export interface RunSave {
   spec: SpecId | null;
   /** Route chosen per segment: [segmentIndex, routeId]. */
   routes: [number, RouteId][];
+  /** Skill ranks reached during the run: [skillId, rank]. */
+  skillRanks: [SkillId, number][];
   savedAt: number;
 }
 
@@ -54,6 +57,8 @@ export interface Profile {
   lives: number;
   /** Simulation speed multiplier: 1x, 2x or 3x. */
   gameSpeed: number;
+  /** Abilities carried into a run, one per slot. */
+  skills: (SkillId | null)[];
   /** The one autosaved campaign run, or null when there is nothing to continue. */
   save: RunSave | null;
   /** Completed New Game+ cycles. Account XP and skills carry over; the campaign
@@ -95,6 +100,7 @@ export function makeProfile(name: string, admin = false): Profile {
     musicOn: true,
     lives: 3,
     gameSpeed: 1,
+    skills: ['magnet', 'fireball'],
     save: null,
     ngPlus: 0,
   };
@@ -140,6 +146,9 @@ function sanitizeSave(raw: unknown): RunSave | null {
     routes: Array.isArray(s.routes)
       ? s.routes.filter((r): r is [number, RouteId] => Array.isArray(r) && r.length === 2 && r[1] in ROUTES)
       : [],
+    skillRanks: Array.isArray(s.skillRanks)
+      ? s.skillRanks.filter((r): r is [SkillId, number] => Array.isArray(r) && r.length === 2 && r[0] in SKILLS)
+      : [],
     savedAt: s.savedAt ?? Date.now(),
   };
 }
@@ -161,6 +170,10 @@ function sanitizeProfile(raw: Partial<Profile>, fallbackName: string): Profile {
   p.gameSpeed = SPEED_CHOICES.includes(p.gameSpeed as (typeof SPEED_CHOICES)[number]) ? p.gameSpeed : 1;
   p.save = sanitizeSave(p.save);
   p.ngPlus = Math.max(0, Math.floor(p.ngPlus ?? 0));
+  p.skills = Array.isArray(p.skills)
+    ? p.skills.slice(0, SKILL_SLOTS).map((id) => (id && id in SKILLS ? id : null))
+    : ['magnet', 'fireball'];
+  while (p.skills.length < SKILL_SLOTS) p.skills.push(null);
   return p;
 }
 
@@ -216,6 +229,10 @@ export const accountLevel = (p: Profile) => accountLevelFromXp(p.totalXp);
 
 export function isSuperUnlocked(p: Profile, id: SuperId): boolean {
   return p.admin || accountLevel(p).level >= SUPERS[id].unlockLevel;
+}
+
+export function isSkillUnlocked(p: Profile, id: SkillId): boolean {
+  return p.admin || accountLevel(p).level >= SKILLS[id].unlockLevel;
 }
 
 // ------------------------------------------------------ campaign overrides --
