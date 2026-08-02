@@ -13,6 +13,15 @@ export interface BossDef {
   w: number;
   h: number;
   taunt: string;
+  /** Some bosses hide behind the level's bricks; others are exposed from the
+   *  first second and have to be fought head-on. */
+  shielded: boolean;
+  /** Pushes rows down from the very start rather than only when desperate. */
+  pushesFromStart: boolean;
+  /** Seconds between row pushes once pushing has begun. */
+  pushEvery: number;
+  /** How this one behaves, for the intro line. */
+  gimmick: string;
 }
 
 /** Bosses are their own entity rather than a brick arrangement: they move,
@@ -28,6 +37,10 @@ export const BOSSES: Record<BossId, BossDef> = {
     w: 120,
     h: 44,
     taunt: 'Периметр закрыт',
+    shielded: true,
+    pushesFromStart: false,
+    pushEvery: 9,
+    gimmick: 'Прячется за кирпичами, пока щит цел',
   },
   weaver: {
     id: 'weaver',
@@ -39,6 +52,11 @@ export const BOSSES: Record<BossId, BossDef> = {
     w: 104,
     h: 40,
     taunt: 'Сеть уже сплетена',
+    // No shield: fast, exposed, and it starts weaving rows down immediately.
+    shielded: false,
+    pushesFromStart: true,
+    pushEvery: 11,
+    gimmick: 'Без щита, но с первой секунды гонит ряды вниз',
   },
   core: {
     id: 'core',
@@ -50,6 +68,10 @@ export const BOSSES: Record<BossId, BossDef> = {
     w: 150,
     h: 52,
     taunt: 'Реактор не остановить',
+    shielded: true,
+    pushesFromStart: true,
+    pushEvery: 7,
+    gimmick: 'Щит и постоянное давление рядами',
   },
   doh: {
     id: 'doh',
@@ -61,6 +83,10 @@ export const BOSSES: Record<BossId, BossDef> = {
     w: 168,
     h: 60,
     taunt: 'Ты дошёл слишком далеко',
+    shielded: false,
+    pushesFromStart: true,
+    pushEvery: 6,
+    gimmick: 'Ни щита, ни пощады: залпы и ряды без перерыва',
   },
 };
 

@@ -6,12 +6,17 @@ export const ARENA_H = 720;
 /** Brick grid. GRID_W === ARENA_W so bricks tile the field edge to edge. */
 export const COLS = 12;
 export const ROWS = 18;
-export const BRICK_W = ARENA_W / COLS; // 40
 export const BRICK_H = 18;
 export const GRID_TOP = 62;
 export const GRID_BOTTOM = GRID_TOP + ROWS * BRICK_H;
 
 export const WALL = 8; // side/top wall thickness
+
+/** The grid lives between the walls, not under them — otherwise the outermost
+ *  column is drawn half-hidden behind the frame. */
+export const GRID_LEFT = WALL;
+export const brickWidthFor = (fieldWidth: number, cols: number): number => (fieldWidth - WALL * 2) / cols;
+export const BRICK_W = brickWidthFor(ARENA_W, COLS);
 
 export const PADDLE_Y = ARENA_H - 52;
 export const PADDLE_W = 84;

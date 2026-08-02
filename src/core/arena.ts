@@ -5,7 +5,9 @@ import {
   BALL_SPEED,
   BALL_SPEED_MAX,
   BRICK_H,
-  BRICK_W,
+  brickWidthFor,
+  COLS,
+  GRID_LEFT,
   COMBO_MAX,
   COMBO_WINDOW,
   ENERGY_MAX,
@@ -32,7 +34,7 @@ import {
 } from './constants';
 import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
-import { BRICK_KINDS, type Brick } from './bricks';
+import { BRICK_KINDS, type Brick, type BrickCode } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
 import { BOSSES, type BossDef, type BossId } from './bosses';
 import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
@@ -226,6 +228,9 @@ export class Arena {
    *  fields rather than ARENA_W/COLS directly. */
   readonly width: number;
   readonly cols: number;
+  /** Brick width for this field: the grid spans the gap between the walls, so a
+   *  wider co-op field keeps the same column count per half. */
+  readonly brickW: number;
 
   level: LevelData;
   bricks: Brick[] = [];
@@ -301,7 +306,8 @@ export class Arena {
   constructor(opts: ArenaOptions) {
     this.mode = opts.mode ?? 'solo';
     this.width = opts.width ?? ARENA_W;
-    this.cols = Math.round(this.width / BRICK_W);
+    this.cols = Math.round((this.width / ARENA_W) * COLS);
+    this.brickW = brickWidthFor(this.width, this.cols);
     this.paddleX = this.width / 2;
     this.p2X = this.width / 2 + 90;
     this.seed = opts.seed ?? (Date.now() >>> 0);
@@ -325,7 +331,7 @@ export class Arena {
     this.level = level;
     this.boss = level.boss ? this.spawnBoss(BOSSES[level.boss]) : null;
     this.bossShots = [];
-    this.bricks = buildBricks(level, this.cols);
+    this.bricks = buildBricks(level, this.cols, this.brickW);
     this.grid = new Array(this.cols * ROWS).fill(null);
     for (const b of this.bricks) this.grid[b.row * this.cols + b.col] = b;
     this.remaining = breakableCount(level, this.cols);
@@ -360,7 +366,7 @@ export class Arena {
    *  rows the boss itself drops do not count — otherwise its phase-3 pushes
    *  would restore the shield and the fight could never end. */
   get bossShielded(): boolean {
-    if (!this.boss) return false;
+    if (!this.boss || !this.boss.def.shielded) return false;
     return this.bricks.some((b) => b.alive && b.kind.hp > 0 && b.kind.code !== 'b');
   }
 
@@ -402,10 +408,12 @@ export class Arena {
       }
     }
 
-    if (boss.phase === 3) {
+    // Some bosses grind rows down from the opening second; the rest only once
+    // they are cornered.
+    if (boss.phase === 3 || boss.def.pushesFromStart) {
       boss.pushTimer -= dt;
       if (boss.pushTimer <= 0) {
-        boss.pushTimer = 9;
+        boss.pushTimer = boss.phase === 3 ? boss.def.pushEvery * 0.7 : boss.def.pushEvery;
         this.pushGarbageRow();
       }
     }
@@ -454,7 +462,11 @@ export class Arena {
         continue;
       }
 
+      // Everything that makes the ball hit harder applies to the boss as well.
       let dmg = this.stats.ballDamage + BALL_TYPES[ball.type].damage;
+      if (ball.fireT > 0) dmg += 2;
+      if (ball.pierceT > 0 || this.timers.pierce > 0) dmg += 1;
+      if (this.stats.critChance > 0 && this.rng.chance(this.stats.critChance)) dmg *= 2;
       if (this.hammerHits > 0) {
         this.hammerHits--;
         dmg *= 5;
@@ -824,7 +836,7 @@ export class Arena {
     let bestD = Infinity;
     for (const b of this.bricks) {
       if (!b.alive || b.kind.hp < 0) continue;
-      const dx = b.x + BRICK_W / 2 - ball.x;
+      const dx = b.x + this.brickW / 2 - ball.x;
       const dy = b.y + BRICK_H / 2 - ball.y;
       const d = dx * dx + dy * dy;
       if (d < bestD) {
@@ -833,15 +845,15 @@ export class Arena {
       }
     }
     if (!best) return;
-    const dir = best.x + BRICK_W / 2 - ball.x;
+    const dir = best.x + this.brickW / 2 - ball.x;
     ball.vx += clamp(dir, -1, 1) * 110 * dt;
   }
 
   private collideBricks(ball: Ball): void {
     const element = BALL_TYPES[ball.type];
     const piercing = ball.pierceT > 0 || ball.fireT > 0 || this.timers.pierce > 0 || element.pierce;
-    const minC = Math.floor((ball.x - ball.r) / BRICK_W) - 1;
-    const maxC = Math.floor((ball.x + ball.r) / BRICK_W) + 1;
+    const minC = Math.floor((ball.x - ball.r - GRID_LEFT) / this.brickW) - 1;
+    const maxC = Math.floor((ball.x + ball.r - GRID_LEFT) / this.brickW) + 1;
     const minR = Math.floor((ball.y - ball.r - GRID_TOP) / BRICK_H) - 1;
     const maxR = Math.floor((ball.y + ball.r - GRID_TOP) / BRICK_H) + 1;
 
@@ -850,7 +862,7 @@ export class Arena {
         const brick = this.cellAt(c, r);
         if (!brick) continue;
 
-        const cx = clamp(ball.x, brick.x, brick.x + BRICK_W);
+        const cx = clamp(ball.x, brick.x, brick.x + this.brickW);
         const cy = clamp(ball.y, brick.y, brick.y + BRICK_H);
         const dx = ball.x - cx;
         const dy = ball.y - cy;
@@ -859,10 +871,10 @@ export class Arena {
         const indestructible = brick.kind.hp < 0;
         if (!piercing || indestructible) {
           // Reflect along the shallowest penetration axis.
-          const overlapX = ball.r + BRICK_W / 2 - Math.abs(ball.x - (brick.x + BRICK_W / 2));
+          const overlapX = ball.r + this.brickW / 2 - Math.abs(ball.x - (brick.x + this.brickW / 2));
           const overlapY = ball.r + BRICK_H / 2 - Math.abs(ball.y - (brick.y + BRICK_H / 2));
           if (overlapX < overlapY) {
-            ball.vx = ball.x < brick.x + BRICK_W / 2 ? -Math.abs(ball.vx) : Math.abs(ball.vx);
+            ball.vx = ball.x < brick.x + this.brickW / 2 ? -Math.abs(ball.vx) : Math.abs(ball.vx);
             ball.x += ball.vx > 0 ? overlapX : -overlapX;
           } else {
             ball.vy = ball.y < brick.y + BRICK_H / 2 ? -Math.abs(ball.vy) : Math.abs(ball.vy);
@@ -888,7 +900,7 @@ export class Arena {
 
   /** What each elemental ball does on top of plain damage. */
   private elementalImpact(ball: Ball, brick: Brick): void {
-    const cx = brick.x + BRICK_W / 2;
+    const cx = brick.x + this.brickW / 2;
     const cy = brick.y + BRICK_H / 2;
 
     switch (ball.type) {
@@ -921,7 +933,7 @@ export class Arena {
           .slice(0, 2);
         for (const { b } of targets) {
           this.damageBrick(b, 1);
-          this.events.push({ t: 'hit', x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, color: BALL_TYPES.plasma.color });
+          this.events.push({ t: 'hit', x: b.x + this.brickW / 2, y: b.y + BRICK_H / 2, color: BALL_TYPES.plasma.color });
         }
         break;
       }
@@ -952,14 +964,14 @@ export class Arena {
     if (!brick.alive) return;
     brick.flash = 1;
     if (brick.kind.hp < 0) {
-      this.events.push({ t: 'hit', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: brick.kind.color });
+      this.events.push({ t: 'hit', x: brick.x + this.brickW / 2, y: brick.y + BRICK_H / 2, color: brick.kind.color });
       return;
     }
     brick.hp -= dmg;
     this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * this.stats.energyMul);
 
     if (brick.hp > 0) {
-      this.events.push({ t: 'hit', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: brick.kind.color });
+      this.events.push({ t: 'hit', x: brick.x + this.brickW / 2, y: brick.y + BRICK_H / 2, color: brick.kind.color });
       return;
     }
     this.destroyBrick(brick);
@@ -977,7 +989,7 @@ export class Arena {
     this.addXp(brick.kind.xp * mul);
     this.score += Math.round(brick.kind.xp * mul);
 
-    const cx = brick.x + BRICK_W / 2;
+    const cx = brick.x + this.brickW / 2;
     const cy = brick.y + BRICK_H / 2;
     this.events.push({ t: 'brick', x: cx, y: cy, color: brick.kind.color, big: brick.kind.xp >= 40 });
     this.shake = Math.min(1, this.shake + 0.12);
@@ -1004,9 +1016,9 @@ export class Arena {
   }
 
   private explode(brick: Brick, radiusCells: number): void {
-    const cx = brick.x + BRICK_W / 2;
+    const cx = brick.x + this.brickW / 2;
     const cy = brick.y + BRICK_H / 2;
-    this.events.push({ t: 'explosion', x: cx, y: cy, r: radiusCells * BRICK_W });
+    this.events.push({ t: 'explosion', x: cx, y: cy, r: radiusCells * this.brickW });
     this.shake = Math.min(1, this.shake + 0.3);
     const rc = Math.ceil(radiusCells);
     for (let r = brick.row - rc; r <= brick.row + rc; r++) {
@@ -1155,6 +1167,15 @@ export class Arena {
     this.lasers.push({ x: this.paddleX + half - 5, y: PADDLE_Y, vy: -LASER_SPEED });
   }
 
+  /** True when a projectile at (x, y) is inside the boss body. */
+  private hitsBoss(x: number, y: number): boolean {
+    const boss = this.boss;
+    if (!boss || boss.dead) return false;
+    return (
+      Math.abs(x - boss.x) <= boss.def.w / 2 && y >= boss.y && y <= boss.y + boss.def.h
+    );
+  }
+
   private updateLasers(dt: number): void {
     for (let i = this.lasers.length - 1; i >= 0; i--) {
       const l = this.lasers[i];
@@ -1163,7 +1184,13 @@ export class Arena {
         this.lasers.splice(i, 1);
         continue;
       }
-      const col = Math.floor(l.x / BRICK_W);
+      // Lasers, the barrage super and the drone all hurt the boss too.
+      if (this.hitsBoss(l.x, l.y)) {
+        this.damageBoss(this.spec ? SPECS[this.spec].laserDamage ?? 1 : 1, l.x, l.y);
+        this.lasers.splice(i, 1);
+        continue;
+      }
+      const col = Math.floor((l.x - GRID_LEFT) / this.brickW);
       const row = Math.floor((l.y - GRID_TOP) / BRICK_H);
       const brick = this.cellAt(col, row);
       if (brick) {
@@ -1230,8 +1257,15 @@ export class Arena {
         this.fireballs.splice(i, 1);
         continue;
       }
+      // A fireball carries its multiplier into the boss as well.
+      if (this.hitsBoss(f.x, f.y)) {
+        this.damageBoss(f.rank >= 3 ? 12 : f.rank >= 2 ? 8 : 4, f.x, f.y);
+        this.fireballs.splice(i, 1);
+        continue;
+      }
+
       const radius = f.rank >= 2 ? 1 : 0;
-      const col = Math.floor(f.x / BRICK_W);
+      const col = Math.floor((f.x - GRID_LEFT) / this.brickW);
       const row = Math.floor((f.y - GRID_TOP) / BRICK_H);
       for (let c = col - radius; c <= col + radius; c++) {
         const brick = this.cellAt(c, row);
@@ -1241,7 +1275,7 @@ export class Arena {
           if (f.rank >= 3) {
             brick.alive = false;
             this.grid[brick.row * this.cols + brick.col] = null;
-            this.events.push({ t: 'brick', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: '#ffffff', big: true });
+            this.events.push({ t: 'brick', x: brick.x + this.brickW / 2, y: brick.y + BRICK_H / 2, color: '#ffffff', big: true });
             this.shake = Math.min(1, this.shake + 0.3);
           }
           continue;
@@ -1305,11 +1339,15 @@ export class Arena {
         break;
 
       case 'chain': {
+        // Lightning arcs into the boss as well, not just the bricks.
+        if (this.boss && !this.boss.dead) {
+          this.damageBoss(rank >= 2 ? 6 : 3, this.boss.x, this.boss.y + this.boss.def.h / 2);
+        }
         const live = this.bricks.filter((b) => b.alive && b.kind.hp > 0);
         const count = rank >= 2 ? 9 : 5;
         for (const brick of this.rng.shuffled(live).slice(0, count)) {
           this.damageBrick(brick, 2);
-          this.events.push({ t: 'hit', x: brick.x + BRICK_W / 2, y: brick.y + BRICK_H / 2, color: '#c46bff' });
+          this.events.push({ t: 'hit', x: brick.x + this.brickW / 2, y: brick.y + BRICK_H / 2, color: '#c46bff' });
           if (rank >= 3) this.explode(brick, 1);
         }
         break;
@@ -1340,6 +1378,17 @@ export class Arena {
         this.timers.catch = Math.max(this.timers.catch, skillDuration(def, rank));
         if (rank >= 3) this.stats.ballDamage += 0.25;
         break;
+
+      case 'multiball': {
+        const extra = rank >= 2 ? 4 : 2;
+        for (let i = 0; i < extra; i++) this.addBall();
+        // Rank III sends the new balls out already carrying an element.
+        if (rank >= 3) {
+          const ids: BallTypeId[] = ['lava', 'aqua', 'laser', 'plasma', 'void'];
+          this.setBallType(this.rng.pick(ids));
+        }
+        break;
+      }
     }
   }
 
@@ -1378,7 +1427,7 @@ export class Arena {
               if (this.cellAt(b.col + dc, b.row + dr)) n++;
             }
           }
-          if (n > best.n) best = { x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, n };
+          if (n > best.n) best = { x: b.x + this.brickW / 2, y: b.y + BRICK_H / 2, n };
         }
         this.active.x = best.x;
         this.active.y = best.y;
@@ -1410,9 +1459,17 @@ export class Arena {
     if (a.id === 'singularity' && a.tick <= 0) {
       a.tick = 0.18;
       const radius = 84;
+      // The black hole chews on the boss too if it drifts into range.
+      if (this.boss && !this.boss.dead) {
+        const bx = this.boss.x;
+        const by = this.boss.y + this.boss.def.h / 2;
+        if (Math.hypot(bx - a.x, by - a.y) <= radius + this.boss.def.w / 2) {
+          this.damageBoss(2, bx, by);
+        }
+      }
       for (const b of this.bricks) {
         if (!b.alive) continue;
-        const dx = b.x + BRICK_W / 2 - a.x;
+        const dx = b.x + this.brickW / 2 - a.x;
         const dy = b.y + BRICK_H / 2 - a.y;
         if (dx * dx + dy * dy > radius * radius) continue;
         if (b.kind.hp < 0) {
@@ -1420,7 +1477,7 @@ export class Arena {
           // the answer to regenerators sealed inside indestructible pockets.
           b.alive = false;
           this.grid[b.row * this.cols + b.col] = null;
-          this.events.push({ t: 'brick', x: b.x + BRICK_W / 2, y: b.y + BRICK_H / 2, color: '#b06bff', big: true });
+          this.events.push({ t: 'brick', x: b.x + this.brickW / 2, y: b.y + BRICK_H / 2, color: '#b06bff', big: true });
         } else {
           this.damageBrick(b, 1);
         }
@@ -1460,13 +1517,18 @@ export class Arena {
       this.grid[b.row * this.cols + b.col] = b;
     }
 
+    // Boss pushes bring a mixed wall rather than a grey slab of garbage.
+    const palette: BrickCode[] = this.boss
+      ? ['b', 'b', 'n', 'n', 't', 's', 'e', 'g', 'r']
+      : ['b'];
+
     for (let c = 0; c < this.cols; c++) {
       if (this.rng.chance(0.12)) continue;
-      const kind = BRICK_KINDS.b;
+      const kind = BRICK_KINDS[this.rng.pick(palette)];
       const brick: Brick = {
         col: c,
         row: 0,
-        x: c * BRICK_W,
+        x: GRID_LEFT + c * this.brickW,
         y: GRID_TOP,
         kind,
         hp: kind.hp,

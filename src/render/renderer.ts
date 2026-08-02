@@ -1,7 +1,7 @@
 import {
   ARENA_H,
   BRICK_H,
-  BRICK_W,
+  GRID_LEFT,
   ENERGY_MAX,
   GRID_TOP,
   PADDLE_H,
@@ -88,7 +88,7 @@ function drawBackground(ctx: CanvasRenderingContext2D, arena: Arena, t: number):
   ctx.globalAlpha = 0.16;
   ctx.strokeStyle = '#2b3d6b';
   ctx.lineWidth = 1;
-  for (let x = 0; x <= arena.width; x += BRICK_W) {
+  for (let x = GRID_LEFT; x <= arena.width - WALL + 0.1; x += arena.brickW) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, ARENA_H);
@@ -137,9 +137,9 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
         ctx.globalAlpha = 0.15 + p * 0.35;
         ctx.strokeStyle = b.kind.color;
         ctx.lineWidth = 1;
-        ctx.strokeRect(b.x + 1.5, b.y + 1.5, BRICK_W - 3, BRICK_H - 3);
+        ctx.strokeRect(b.x + 1.5, b.y + 1.5, arena.brickW - 3, BRICK_H - 3);
         ctx.fillStyle = withAlpha(b.kind.color, 0.25);
-        ctx.fillRect(b.x + 2, b.y + BRICK_H - 2 - (BRICK_H - 4) * p, BRICK_W - 4, (BRICK_H - 4) * p);
+        ctx.fillRect(b.x + 2, b.y + BRICK_H - 2 - (BRICK_H - 4) * p, arena.brickW - 4, (BRICK_H - 4) * p);
         ctx.restore();
       }
       continue;
@@ -148,7 +148,7 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
     const damaged = b.kind.hp > 1 ? clamp(b.hp / b.kind.hp, 0.25, 1) : 1;
     const x = b.x + 1.5;
     const y = b.y + 1.5;
-    const w = BRICK_W - 3;
+    const w = arena.brickW - 3;
     const h = BRICK_H - 3;
 
     ctx.save();

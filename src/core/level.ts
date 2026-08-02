@@ -1,4 +1,4 @@
-import { COLS, ROWS, BRICK_W, BRICK_H, GRID_TOP } from './constants';
+import { COLS, ROWS, BRICK_W, BRICK_H, GRID_LEFT, GRID_TOP } from './constants';
 import { BRICK_KINDS, EMPTY, isBrickCode, type Brick } from './bricks';
 import { BOSSES, type BossId } from './bosses';
 
@@ -78,7 +78,7 @@ export function widenRows(rows: string[], cols: number): string[] {
   });
 }
 
-export function buildBricks(level: LevelData, cols = COLS): Brick[] {
+export function buildBricks(level: LevelData, cols = COLS, brickW = BRICK_W): Brick[] {
   const out: Brick[] = [];
   const rows = widenRows(level.rows, cols);
   for (let r = 0; r < ROWS; r++) {
@@ -90,7 +90,7 @@ export function buildBricks(level: LevelData, cols = COLS): Brick[] {
       out.push({
         col: c,
         row: r,
-        x: c * BRICK_W,
+        x: GRID_LEFT + c * brickW,
         y: GRID_TOP + r * BRICK_H,
         kind,
         hp: kind.hp,

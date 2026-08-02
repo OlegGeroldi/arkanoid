@@ -12,7 +12,8 @@ export type SkillId =
   | 'chain'
   | 'repair'
   | 'rain'
-  | 'glue';
+  | 'glue'
+  | 'multiball';
 
 export interface SkillDef {
   id: SkillId;
@@ -155,6 +156,17 @@ export const SKILLS: Record<SkillId, SkillDef> = {
     cooldown: 90,
     unlockLevel: 5,
     ranks: ['десять капсул', 'среди них всегда элементальный шар'],
+    school: 'elementalist',
+  },
+  multiball: {
+    id: 'multiball',
+    name: 'Мультибол',
+    icon: '◎',
+    color: '#ffd24d',
+    desc: 'Выпускает два дополнительных мяча',
+    cooldown: 50,
+    unlockLevel: 2,
+    ranks: ['четыре мяча вместо двух', 'новые мячи приходят элементальными'],
     school: 'elementalist',
   },
   glue: {
