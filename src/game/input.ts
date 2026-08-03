@@ -75,6 +75,9 @@ export class InputHub {
   /** Whichever device was used last owns the paddle: pressing a movement key
    *  hands control to the keyboard, moving the mouse takes it back. */
   private pointerOwns = false;
+  /** True while the pointer is captured by the canvas. Captured, the mouse
+   *  cannot wander into the browser chrome or off-screen mid-rally. */
+  locked = false;
 
   constructor(private target: HTMLCanvasElement) {
     window.addEventListener('keydown', this.onKeyDown);
@@ -86,9 +89,27 @@ export class InputHub {
     target.addEventListener('touchstart', this.onTouch, { passive: false });
     target.addEventListener('touchmove', this.onTouch, { passive: false });
     target.addEventListener('touchend', this.onTouchEnd);
+    document.addEventListener('pointerlockchange', this.onLockChange);
   }
 
+  /** Asks the browser to hand the mouse over to the game. Silently ignored when
+   *  the gesture requirement is not met — play continues with a free cursor. */
+  lockPointer(): void {
+    if (this.locked) return;
+    void this.target.requestPointerLock?.();
+  }
+
+  releasePointer(): void {
+    if (document.pointerLockElement === this.target) document.exitPointerLock();
+  }
+
+  private onLockChange = (): void => {
+    this.locked = document.pointerLockElement === this.target;
+  };
+
   dispose(): void {
+    document.removeEventListener('pointerlockchange', this.onLockChange);
+    this.releasePointer();
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
@@ -129,7 +150,17 @@ export class InputHub {
     this.pointer = next;
   }
 
-  private onMouseMove = (e: MouseEvent): void => this.setPointer(e.clientX, e.clientY);
+  private onMouseMove = (e: MouseEvent): void => {
+    if (this.locked) {
+      // Captured: the OS pointer stands still, so movement is relative.
+      const r = this.target.getBoundingClientRect();
+      const x = (this.pointer?.x ?? r.width / 2) + e.movementX;
+      this.pointer = { x: Math.min(Math.max(x, 0), r.width), y: this.pointer?.y ?? r.height / 2 };
+      if (e.movementX !== 0) this.pointerOwns = true;
+      return;
+    }
+    this.setPointer(e.clientX, e.clientY);
+  };
 
   private onMouseDown = (e: MouseEvent): void => {
     this.setPointer(e.clientX, e.clientY);

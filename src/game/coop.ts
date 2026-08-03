@@ -189,7 +189,10 @@ export function coopScene(app: App, opts: CoopOptions): Scene {
       t += dt;
       if (app.input.wasPressed(['Escape']) && !finished && arena.state !== 'cleared') togglePause();
       fx.update(dt);
-      if (paused || finished) return;
+      // Any open panel — pause, results, story beat — freezes the simulation.
+      // Story panels appear while the ball is still live, so without this the
+      // game plays on underneath the text.
+      if (paused || finished || panelOpen) return;
 
       const i1 = app.input.read(P1_KEYS, null);
       const i2 = app.input.read(P2_KEYS, null);
@@ -202,7 +205,6 @@ export function coopScene(app: App, opts: CoopOptions): Scene {
       fx.consume(events);
       sfx.consume(events, arena.combo);
 
-      if (panelOpen) return;
       if (arena.state === 'cleared') levelCleared();
       else if (arena.state === 'dead') dead();
     },

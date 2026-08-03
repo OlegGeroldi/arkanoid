@@ -542,7 +542,10 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       if (app.input.wasPressed(['KeyF'])) cycleSpeed();
       if (app.profile.admin) adminKeys();
       fx.update(dt);
-      if (paused || finished) return;
+      // Any open panel — pause, results, story beat — freezes the simulation.
+      // Story panels appear while the ball is still live, so without this the
+      // game plays on underneath the text.
+      if (paused || finished || panelOpen) return;
 
       const pointer = app.pointer;
       const arenaX = pointer && layout.scale > 0 ? (pointer.x - layout.ox) / layout.scale : null;
@@ -556,7 +559,6 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       fx.consume(events);
       sfx.consume(events, arena.combo);
 
-      if (panelOpen) return;
       if (arena.state === 'cleared') levelCleared();
       else if (arena.state === 'dead') dead();
     },

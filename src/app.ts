@@ -83,9 +83,17 @@ export class App {
     const sync = (): void => {
       const menuOpen = this.overlay.classList.contains('interactive');
       this.canvas.classList.toggle('hide-cursor', !menuOpen);
+      // A menu needs a real cursor, so hand the mouse back whenever one opens.
+      if (menuOpen) this.input.releasePointer();
     };
     new MutationObserver(sync).observe(this.overlay, { attributes: true, attributeFilter: ['class'] });
     sync();
+
+    // Clicking the playfield gives the mouse to the game: it then cannot slide
+    // into the browser chrome or off the screen mid-rally. Esc releases it.
+    this.canvas.addEventListener('mousedown', () => {
+      if (!this.overlay.classList.contains('interactive')) this.input.lockPointer();
+    });
   }
 
   /** Joins the LAN room when the game was served by the room server. Opened as
