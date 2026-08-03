@@ -31,6 +31,7 @@ import { formatTime, summarise } from '../core/stats';
 import { hall } from '../core/hall';
 import { ALL_ENTRIES, type StoryEntry } from '../core/story';
 import { net } from '../net/client';
+import { netVersusScene } from '../game/netVersus';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -699,6 +700,33 @@ export function mainMenu(app: App): Scene {
           online && others.length
             ? el(
                 'div',
+                { style: 'margin-top:14px' },
+                el('h3', {}, 'Сетевой матч'),
+                el(
+                  'p',
+                  { class: 'hint', style: 'margin-top:0' },
+                  'Раздельный экран на две машины: каждый играет своё поле, суперы и саботажные шары летят по сети. Вызов принимает первый, кто нажмёт «Присоединиться».',
+                ),
+                el(
+                  'div',
+                  { class: 'row' },
+                  button(
+                    'Начать матч (я хост)',
+                    () => startNetMatch(true, others[0]?.name ?? 'Соперник'),
+                    'btn small primary',
+                  ),
+                  button(
+                    'Присоединиться',
+                    () => startNetMatch(false, others[0]?.name ?? 'Соперник'),
+                    'btn small',
+                  ),
+                ),
+              )
+            : null,
+
+          online && others.length
+            ? el(
+                'div',
                 {},
                 el('h3', { style: 'margin-top:16px' }, 'Кто сейчас играет'),
                 el(
@@ -744,6 +772,21 @@ export function mainMenu(app: App): Scene {
     unsubscribe?.();
     unsubscribe = net.subscribe(render);
     render();
+  }
+
+  /** Both machines enter the same scene; the host settles the seed. */
+  function startNetMatch(host: boolean, opponentName: string): void {
+    unsubscribe?.();
+    unsubscribe = null;
+    app.setScene((a) =>
+      netVersusScene(a, {
+        levels: a.campaignLevels(),
+        superId: a.profile.favouriteSuper,
+        lives: a.profile.lives,
+        host,
+        opponentName,
+      }),
+    );
   }
 
   // --------------------------------------------------------------- story --

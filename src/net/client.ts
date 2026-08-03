@@ -20,6 +20,7 @@ export interface Peer {
 export type NetStatus = 'offline' | 'connecting' | 'online';
 
 type Listener = () => void;
+type RelayListener = (payload: unknown, from: string) => void;
 
 /** Talks to the LAN server when the game is served from one.
  *
@@ -29,6 +30,7 @@ type Listener = () => void;
 export class NetClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
+  private relayListeners = new Set<RelayListener>();
   private retry = 0;
   private retryTimer: number | null = null;
 
@@ -117,6 +119,10 @@ export class NetClient {
         case 'hall':
           if (Array.isArray(msg.hall)) this.serverHall = msg.hall as HallEntry[];
           break;
+        case 'relay':
+          // Game modes talk to each other through this channel.
+          for (const fn of this.relayListeners) fn(msg.payload, String(msg.id ?? ''));
+          break;
         default:
           break;
       }
@@ -171,6 +177,12 @@ export class NetClient {
     this.status = 'offline';
     this.peers = [];
     this.emit();
+  }
+
+  /** Subscribes to messages other clients send with relay(). */
+  onRelay(fn: RelayListener): () => void {
+    this.relayListeners.add(fn);
+    return () => this.relayListeners.delete(fn);
   }
 
   subscribe(fn: Listener): () => void {
