@@ -52,7 +52,13 @@ function withAlpha(hex: string, alpha: number): string {
 
 /** Draws one playfield. The caller has already translated the context so that
  *  (0,0) is the arena's top-left corner. */
-export function drawArena(ctx: CanvasRenderingContext2D, arena: Arena, fx: ArenaFx, t: number): void {
+export function drawArena(
+  ctx: CanvasRenderingContext2D,
+  arena: Arena,
+  fx: ArenaFx,
+  t: number,
+  mouseFree = false,
+): void {
   ctx.save();
 
   // Screen shake, applied inside the arena only.
@@ -73,7 +79,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, arena: Arena, fx: Arena
   drawShield(ctx, arena);
   fx.draw(ctx);
   drawHazards(ctx, arena, t);
-  drawStateOverlay(ctx, arena);
+  drawStateOverlay(ctx, arena, mouseFree);
 
   ctx.restore();
 }
@@ -526,13 +532,24 @@ function drawHazards(ctx: CanvasRenderingContext2D, arena: Arena, t: number): vo
   }
 }
 
-function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena): void {
+function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree = false): void {
   if (arena.state === 'serve') {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.font = `600 15px ${FONT}`;
     ctx.fillText('Огонь — запуск мяча', arena.width / 2, PADDLE_Y - 46);
+    ctx.restore();
+  }
+
+  // The browser only grants pointer capture on a click, so say so once rather
+  // than letting the mouse wander into the toolbar unexplained.
+  if (mouseFree) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,210,77,0.75)';
+    ctx.font = `600 12px ${FONT}`;
+    ctx.fillText('Клик по полю — мышь остаётся в игре', arena.width / 2, PADDLE_Y + 34);
     ctx.restore();
   }
 

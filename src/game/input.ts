@@ -160,19 +160,22 @@ export class InputHub {
   }
 
   private onMouseMove = (e: MouseEvent): void => {
+    const r = this.target.getBoundingClientRect();
     if (this.locked) {
-      // Captured: the OS pointer stands still, so movement is relative.
-      const r = this.target.getBoundingClientRect();
+      // Captured: the OS pointer stands still, so movement is relative — and
+      // only horizontal movement counts. A paddle has one axis; vertical mouse
+      // travel should do nothing at all.
       const x = (this.pointer?.x ?? r.width / 2) + e.movementX;
-      this.pointer = { x: Math.min(Math.max(x, 0), r.width), y: this.pointer?.y ?? r.height / 2 };
+      this.pointer = { x: Math.min(Math.max(x, 0), r.width), y: r.height / 2 };
       if (e.movementX !== 0) this.pointerOwns = true;
       return;
     }
-    this.setPointer(e.clientX, e.clientY);
+    // Uncaptured, the vertical position is likewise ignored: only x is read.
+    this.setPointer(e.clientX, r.top + r.height / 2);
   };
 
   private onMouseDown = (e: MouseEvent): void => {
-    this.setPointer(e.clientX, e.clientY);
+    this.setPointer(e.clientX, this.target.getBoundingClientRect().top + 1);
     this.pointerDown = true;
     this.clicked = true;
   };

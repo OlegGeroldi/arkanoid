@@ -575,7 +575,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       ctx.beginPath();
       ctx.rect(0, 0, ARENA_W, ARENA_H);
       ctx.clip();
-      drawArena(ctx, arena, fx, t);
+      drawArena(ctx, arena, fx, t, !app.input.locked);
       ctx.restore();
 
       drawHud(ctx, arena, ARENA_W + GAP, 0, HUD_W, SCENE_H, {
