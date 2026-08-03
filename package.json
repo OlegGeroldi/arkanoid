@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "serve": "node server/index.js",
+    "lan": "npm run build && node server/index.js"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

@@ -17,6 +17,7 @@ import { ngBallSpeedMul, ngXpMul, SPEED_CHOICES, type RunSave } from '../core/st
 import { baseStats, XP_RATE } from '../core/progression';
 import { formatTime, recordClear, recordDeath, timeBonus } from '../core/stats';
 import { hall } from '../core/hall';
+import { net } from '../net/client';
 import { routeChoices, ROUTES, SEGMENT, segmentOf, type RouteDef, type RouteId } from '../core/routes';
 import { BOSS_DEFEAT, BOSS_INTRO, cycleLine, FINALE, PROLOGUE, ROUTE_LORE, type StoryEntry } from '../core/story';
 import { generateLevel } from '../core/levelGen';
@@ -301,9 +302,22 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       });
       submitToHall();
     }
+    reportProgress();
     xpAtLevelStart = arena.xpEarned;
     scoreAtLevelStart = arena.score;
     return bonus;
+  }
+
+  /** Tells the room what this player is up to, for the spectator list. */
+  function reportProgress(): void {
+    net.reportProgress({
+      level: index + 1,
+      score: arena.score,
+      lives: arena.lives,
+      xpLevel: arena.xpLevel,
+      mode: opts.title,
+      cleared: 0,
+    });
   }
 
   function submitToHall(): void {

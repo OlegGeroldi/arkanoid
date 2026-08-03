@@ -11,6 +11,8 @@ import {
 import { sfx } from './audio/sfx';
 import { music } from './audio/music';
 import { CAMPAIGN_LEVELS } from './core/campaignLevels';
+import { net } from './net/client';
+import { hall } from './core/hall';
 import type { LevelData } from './core/level';
 
 export interface Scene {
@@ -70,6 +72,28 @@ export class App {
     this.resize();
     window.addEventListener('resize', this.resize);
     this.initAudio();
+    this.initNetwork();
+    this.initCursor();
+  }
+
+  /** Hides the mouse pointer while play is actually happening. The overlay is
+   *  interactive exactly when a menu or panel is up, so tracking that class
+   *  gives the right behaviour without every scene having to opt in. */
+  private initCursor(): void {
+    const sync = (): void => {
+      const menuOpen = this.overlay.classList.contains('interactive');
+      this.canvas.classList.toggle('hide-cursor', !menuOpen);
+    };
+    new MutationObserver(sync).observe(this.overlay, { attributes: true, attributeFilter: ['class'] });
+    sync();
+  }
+
+  /** Joins the LAN room when the game was served by the room server. Opened as
+   *  a file or from a static host this stays offline and nothing else changes. */
+  private initNetwork(): void {
+    hall.uplink = (entry) => net.submitHall(entry);
+    net.subscribe(() => hall.mergeRemote(net.serverHall));
+    net.connect(this.profile.name);
   }
 
   /** Browsers block audio until the user interacts, so the whole audio layer

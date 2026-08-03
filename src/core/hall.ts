@@ -71,6 +71,17 @@ export class Hall {
   submit(entry: Omit<HallEntry, 'at' | 'source'>): void {
     const full: HallEntry = { ...entry, at: Date.now(), source: SOURCE_ID };
     this.merge([full], true);
+    // When a LAN server is behind this page, the score travels to the other
+    // machines too; offline this is a no-op.
+    this.uplink?.(full);
+  }
+
+  /** Installed by the network client so submissions reach the server as well. */
+  uplink: ((entry: HallEntry) => void) | null = null;
+
+  /** Folds the server's table into the local one. */
+  mergeRemote(entries: HallEntry[]): void {
+    if (entries.length) this.merge(entries, false);
   }
 
   private merge(incoming: HallEntry[], broadcast: boolean): void {

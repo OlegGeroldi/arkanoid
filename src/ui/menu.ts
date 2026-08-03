@@ -30,6 +30,7 @@ import { SKILL_LIST, SKILL_SLOTS } from '../core/skills';
 import { formatTime, summarise } from '../core/stats';
 import { hall } from '../core/hall';
 import { ALL_ENTRIES, type StoryEntry } from '../core/story';
+import { net } from '../net/client';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -154,6 +155,14 @@ export function mainMenu(app: App): Scene {
           modeCard('🛠', 'Редактор уровней', 'Рисуйте поля, тестируйте, экспортируйте', () => screenEditor()),
           modeCard('📖', 'Хроника', `Открыто записей: ${app.profile.storySeen.length} из ${ALL_ENTRIES.length}`, () => screenStory()),
           modeCard('📊', 'Статистика', 'По каждому уровню и по всем игрокам', () => screenStats()),
+          modeCard(
+            '🌐',
+            'Сеть',
+            net.status === 'online'
+              ? `В комнате: ${net.peers.length} · ${net.shareUrl}`
+              : 'Игра по локальной сети и общий доступ по ссылке',
+            () => screenNetwork(),
+          ),
           modeCard('🏆', 'Доска почёта', 'Общая для всех запущенных копий игры', () => screenHall()),
           modeCard('🔊', 'Звук и музыка', 'Громкость эффектов, свои треки из Suno', () => screenAudio()),
           modeCard('⌨️', 'Управление и правила', 'Клавиши, бонусы, шары, кирпичи', () => screenHelp()),
@@ -639,6 +648,101 @@ export function mainMenu(app: App): Scene {
         ),
       );
     };
+    render();
+  }
+
+  // ------------------------------------------------------------- network --
+
+  /** Room screen: the address to share, who is connected and what they are
+   *  playing right now. Offline it explains how to get online instead. */
+  function screenNetwork(): void {
+    const render = (): void => {
+      const online = net.status === 'online';
+      const others = net.peers.filter((p) => p.id !== net.selfId);
+
+      show(
+        el(
+          'div',
+          { class: 'screen' },
+          el('h2', {}, 'Сеть'),
+          el(
+            'div',
+            { class: 'row', style: 'gap:8px;margin-bottom:12px' },
+            el(
+              'span',
+              { class: `pill ${online ? '' : 'pink'}` },
+              online ? 'Подключено' : net.status === 'connecting' ? 'Подключение…' : 'Не подключено',
+            ),
+            online ? el('span', { class: 'pill' }, `Игроков в комнате: ${net.peers.length}`) : null,
+          ),
+
+          online
+            ? el(
+                'div',
+                {},
+                el('p', { class: 'hint' }, 'Дайте эту ссылку любому в вашей сети — игра откроется у него в браузере:'),
+                el('pre', { class: 'code' }, net.shareUrl),
+              )
+            : el(
+                'div',
+                {},
+                el(
+                  'p',
+                  { class: 'hint' },
+                  'Игра открыта не с сервера комнат, поэтому сеть недоступна. Доска почёта и статистика работают локально.',
+                ),
+                el('p', { class: 'hint' }, 'Чтобы играть по локальной сети, на одном из компьютеров выполните:'),
+                el('pre', { class: 'code' }, 'npm run build\nnpm run serve'),
+                el('p', { class: 'hint' }, 'Сервер напечатает адрес вида http://192.168.х.х:8080 — его и открывают остальные.'),
+              ),
+
+          online && others.length
+            ? el(
+                'div',
+                {},
+                el('h3', { style: 'margin-top:16px' }, 'Кто сейчас играет'),
+                el(
+                  'div',
+                  { class: 'table-wrap' },
+                  el(
+                    'table',
+                    { class: 'stats' },
+                    el('tr', {}, el('th', {}, 'Игрок'), el('th', {}, 'Режим'), el('th', {}, 'Уровень'), el('th', {}, 'Счёт'), el('th', {}, 'Жизни')),
+                    ...others.map((p) =>
+                      el(
+                        'tr',
+                        {},
+                        el('td', {}, p.name),
+                        el('td', {}, p.progress?.mode ?? '—'),
+                        el('td', {}, p.progress ? String(p.progress.level) : '—'),
+                        el('td', {}, p.progress ? String(p.progress.score) : '—'),
+                        el('td', {}, p.progress ? String(p.progress.lives) : '—'),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : online
+              ? el('p', { class: 'hint', style: 'margin-top:14px' }, 'Пока вы один в комнате. Поделитесь ссылкой выше.')
+              : null,
+
+          el(
+            'div',
+            { class: 'row', style: 'margin-top:20px' },
+            button('Назад', () => {
+              unsubscribe?.();
+              unsubscribe = null;
+              screenMain();
+            }, 'btn primary'),
+            !online ? button('Повторить подключение', () => net.connect(app.profile.name), 'btn small') : null,
+          ),
+        ),
+      );
+    };
+
+    // Live: peers appearing and their progress redraw this screen.
+    unsubscribe?.();
+    unsubscribe = net.subscribe(render);
     render();
   }
 
