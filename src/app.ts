@@ -89,11 +89,19 @@ export class App {
     new MutationObserver(sync).observe(this.overlay, { attributes: true, attributeFilter: ['class'] });
     sync();
 
-    // Clicking the playfield gives the mouse to the game: it then cannot slide
-    // into the browser chrome or off the screen mid-rally. Esc releases it.
-    this.canvas.addEventListener('mousedown', () => {
-      if (!this.overlay.classList.contains('interactive')) this.input.lockPointer();
-    });
+    // Any click on the playfield also grabs it, in case the capture was
+    // declined earlier (the browser needs a gesture and refuses for a moment
+    // after the user pressed Esc).
+    this.canvas.addEventListener('mousedown', () => this.capturePointer());
+  }
+
+  /** Hands the mouse to the game. Called when a scene starts and whenever a
+   *  panel closes — both happen inside a click, which is the gesture the
+   *  browser requires. Once captured the pointer cannot reach the browser's own
+   *  tabs and toolbars; Esc is the way out. */
+  capturePointer(): void {
+    if (this.overlay.classList.contains('interactive')) return;
+    this.input.lockPointer();
   }
 
   /** Joins the LAN room when the game was served by the room server. Opened as

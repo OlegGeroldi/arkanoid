@@ -104,8 +104,17 @@ export class InputHub {
   }
 
   private onLockChange = (): void => {
+    const was = this.locked;
     this.locked = document.pointerLockElement === this.target;
+    // Escape is swallowed by the browser to release the pointer, so the game
+    // would never see it. Treat losing the capture as the pause key instead.
+    if (was && !this.locked) this.injectKey('Escape');
   };
+
+  /** Feeds a synthetic press into this frame's edge-triggered input. */
+  injectKey(code: string): void {
+    this.pressedNow.add(code);
+  }
 
   dispose(): void {
     document.removeEventListener('pointerlockchange', this.onLockChange);

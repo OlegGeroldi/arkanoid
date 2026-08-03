@@ -63,6 +63,7 @@ export function coopScene(app: App, opts: CoopOptions): Scene {
   let t = 0;
 
   music.setScene('versus');
+  app.capturePointer();
 
   function panel(title: string, tone: string, lines: string[], actions: HTMLElement[]): void {
     panelOpen = true;
@@ -82,6 +83,9 @@ export function coopScene(app: App, opts: CoopOptions): Scene {
     panelOpen = false;
     app.overlay.replaceChildren();
     app.overlay.classList.remove('interactive');
+    // Closing a panel is a click, so this is a valid moment to take the mouse
+    // back — otherwise it would drift into the browser chrome mid-rally.
+    app.capturePointer();
   }
 
   function bank(): void {

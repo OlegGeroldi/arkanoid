@@ -101,6 +101,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   let t = 0;
   const exit = opts.onExit ?? mainMenu;
   music.setScene('game');
+  app.capturePointer();
   markReached();
 
   // Prologue on a fresh campaign; a resumed run picks up mid-sentence.
@@ -204,6 +205,9 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
     panelOpen = false;
     app.overlay.replaceChildren();
     app.overlay.classList.remove('interactive');
+    // Closing a panel is a click, so this is a valid moment to take the mouse
+    // back — otherwise it would drift into the browser chrome mid-rally.
+    app.capturePointer();
   }
 
   function nextLevel(): void {
