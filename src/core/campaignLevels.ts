@@ -1,11 +1,35 @@
 import { BUILTIN_LEVELS } from './builtinLevels';
 import { generateLevel } from './levelGen';
 import { emptyRows, type LevelData } from './level';
-import { BOSSES, bossForLevel } from './bosses';
+import { BOSSES, bossForLevel, type BossId } from './bosses';
+import { Rng } from './rng';
 
 /** The boss shield: a short band of bricks, clear of the boss's own body. */
 const SHIELD_TOP = 3;
 const SHIELD_ROWS = 4;
+
+/** Share of the shield turned into explosive bricks, per boss. Blasts hurt the
+ *  boss as well as the shield, so these are both the way in and the opening
+ *  damage — and DOH, who has the most hit points and the least patience, is
+ *  wired the most heavily. */
+const CHARGE_SHARE: Record<BossId, number> = {
+  sentinel: 0.18,
+  weaver: 0.22,
+  core: 0.26,
+  doh: 0.34,
+};
+
+/** Scatters explosives through a boss's shield band. Seeded by level index, so
+ *  the same fight always looks the same. */
+function seedCharges(rows: string[], boss: BossId, index: number): string[] {
+  const rng = new Rng((0x5eed + index * 40503) >>> 0);
+  const share = CHARGE_SHARE[boss];
+  return rows.map((row) =>
+    [...row]
+      .map((ch) => (ch !== '.' && ch !== 'x' && ch !== 'e' && rng.chance(share) ? 'e' : ch))
+      .join(''),
+  );
+}
 
 export const CAMPAIGN_SIZE = 100;
 /** Where the generator stops designing and starts breaking things. */
@@ -33,7 +57,7 @@ function buildCampaign(): LevelData[] {
     for (let r = 0; r < SHIELD_ROWS; r++) {
       shield[SHIELD_TOP + r] = level.rows[r + 2] ?? level.rows[r] ?? shield[SHIELD_TOP + r];
     }
-    return { ...level, boss, name: BOSSES[boss].name, rows: shield };
+    return { ...level, boss, name: BOSSES[boss].name, rows: seedCharges(shield, boss, i) };
   });
 }
 

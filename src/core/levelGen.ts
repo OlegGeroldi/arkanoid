@@ -182,11 +182,26 @@ function openRegeneratorPockets(grid: string[][], rows: number): void {
         [c, r + 1],
       ];
       const walls = sides.filter(([sc, sr]) => at(sc, sr) === 'x');
-      if (walls.length < sides.filter(([sc, sr]) => at(sc, sr) !== '.').length) continue;
       if (!walls.length) continue;
-      // Every reachable side is a wall — turn one of them into a normal brick.
-      const [wc, wr] = walls[0];
-      grid[wr][wc] = 'n';
+
+      const sealed = walls.length >= sides.filter(([sc, sr]) => at(sc, sr) !== '.').length;
+      if (sealed) {
+        // Every reachable side is a wall. Open one — with an explosive, which
+        // takes its neighbours with it: digging a regenerator out from behind
+        // indestructible bricks one hit at a time is the least fun the game has.
+        const [wc, wr] = walls[0];
+        grid[wr][wc] = 'e';
+        continue;
+      }
+      // Not sealed, but hemmed in. Plant a charge on a side that is already
+      // breakable, so the pocket can be opened up rather than chipped at.
+      if (walls.length >= 2) {
+        const soft = sides.find(([sc, sr]) => {
+          const ch = at(sc, sr);
+          return ch !== '.' && ch !== 'x' && ch !== 'r' && ch !== 'e';
+        });
+        if (soft) grid[soft[1]][soft[0]] = 'e';
+      }
     }
   }
 }

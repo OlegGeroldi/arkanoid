@@ -205,6 +205,10 @@ export interface BossShot {
   vy: number;
 }
 
+/** Damage an explosive brick does to a boss it goes off against. Comparable to
+ *  a super hit, so clearing a boss's shield with explosives is a real tactic. */
+const EXPLOSION_BOSS_DAMAGE = 3;
+
 const zeroTimers = (): Timers => ({
   expand: 0,
   shrink: 0,
@@ -1144,6 +1148,22 @@ export class Arena {
         this.damageBrick(other, 2);
       }
     }
+
+    // A blast next to the boss hurts it too. Everything else in the game that
+    // deals damage reaches the boss, and an explosive brick going off against
+    // its hull obviously should — it also turns the wall a boss drops on itself
+    // into a weapon.
+    const boss = this.boss;
+    if (boss && !boss.dead) {
+      const radius = radiusCells * this.brickW;
+      const nx = Math.max(boss.x - boss.def.w / 2, Math.min(cx, boss.x + boss.def.w / 2));
+      const ny = Math.max(boss.y, Math.min(cy, boss.y + boss.def.h));
+      const dx = cx - nx;
+      const dy = cy - ny;
+      if (dx * dx + dy * dy <= radius * radius) {
+        this.damageBoss(EXPLOSION_BOSS_DAMAGE, cx, cy);
+      }
+    }
   }
 
   private rollDrop(brick: Brick, cx: number, cy: number): void {
@@ -1645,11 +1665,13 @@ export class Arena {
       this.grid[b.row * this.cols + b.col] = b;
     }
 
-    // Boss pushes bring a mixed wall rather than a grey slab of garbage.
+    // Boss pushes bring a mixed wall rather than a grey slab of garbage, and it
+    // is thick with charges: a blast reaches the boss, so the wall it drops on
+    // itself is also the player's way back into the fight.
     const palette: BrickCode[] = forceCode
       ? [forceCode]
       : this.boss
-        ? ['b', 'b', 'n', 'n', 't', 's', 'e', 'g', 'r']
+        ? ['b', 'n', 'n', 't', 'e', 'e', 'e', 's', 'g', 'r']
         : ['b'];
 
     for (let c = 0; c < this.cols; c++) {
