@@ -334,10 +334,17 @@ p.story {
   font-size: 10px;
   color: var(--muted);
 }
-.racecell.hole {
+.racecell.known {
   background: color-mix(in srgb, var(--hole) 16%, transparent);
   border-color: color-mix(in srgb, var(--hole) 55%, transparent);
   color: var(--hole);
+  animation: cellreveal 0.5s ease;
+}
+/* A cell only lights up when somebody has stepped on it, so the flash marks
+   the moment the board gave up one more secret. */
+@keyframes cellreveal {
+  0% { transform: scale(0.7); filter: brightness(2.4); }
+  100% { transform: scale(1); filter: brightness(1); }
 }
 .racecell.finish {
   background: rgba(255, 77, 109, 0.18);

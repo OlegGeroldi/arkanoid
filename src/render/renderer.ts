@@ -709,6 +709,10 @@ export interface HudOptions {
   subtitle?: string;
   /** Current frame rate — shown so a slowdown is visible, not guessed at. */
   fps?: number;
+  /** Replaces the count-up level timer with a countdown. The race runs on a
+   *  deadline, and a number that grows reads as the opposite of one that is
+   *  running out — the whole point of the cards that buy seconds. */
+  countdown?: { label: string; seconds: number };
 }
 
 export function drawHud(
@@ -855,15 +859,31 @@ export function drawHud(
   }
 
   // Level timer: informative only — it feeds the end-of-level score bonus.
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.font = `600 11px ${FONT}`;
-  ctx.fillText('ВРЕМЯ УРОВНЯ', pad, cy);
-  ctx.fillStyle = '#ffd24d';
-  ctx.font = `700 13px ${FONT}`;
-  ctx.textAlign = 'right';
-  ctx.fillText(formatTime(arena.levelTime), w - pad, cy);
-  ctx.textAlign = 'left';
-  cy += 22;
+  // A countdown, where one is given, takes its place and is drawn large: in the
+  // race it is the thing the whole turn is fighting against.
+  if (opt.countdown) {
+    const left = Math.max(0, opt.countdown.seconds);
+    const low = left <= 15;
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText(opt.countdown.label, pad, cy);
+    ctx.fillStyle = low ? '#ff4d6d' : '#3ddc84';
+    ctx.font = `800 26px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(formatTime(left), w - pad, cy + 8);
+    ctx.textAlign = 'left';
+    cy += 34;
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText('ВРЕМЯ УРОВНЯ', pad, cy);
+    ctx.fillStyle = '#ffd24d';
+    ctx.font = `700 13px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(formatTime(arena.levelTime), w - pad, cy);
+    ctx.textAlign = 'left';
+    cy += 22;
+  }
 
   // Score + combo
   ctx.fillStyle = '#ffffff';

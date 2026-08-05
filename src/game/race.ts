@@ -15,34 +15,33 @@ import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
 import { DEBUFF_LIST } from '../core/debuffs';
 import {
+  ALLY_CARDS,
   BOSS_TURN_LIVES,
   BOSS_TURN_SECONDS,
   CARDS,
-  CARD_REDRAW,
+  CELL_TYPES,
   FINALE_KNOCKBACK,
   HAND_SIZE,
-  IDLE_INFLUENCE,
   JAM_KEY,
   JAM_PER_TURN,
   SEAT_KEYS,
   SEAT_KEY_LABELS,
+  STOCK_MAX,
   TURN_LIVES,
   TURN_SECONDS,
-  WORMHOLES,
   cardAllowed,
-  cardCost,
-  drawCard,
-  influenceForTurn,
+  cardsForTurn,
+  giveCards,
   levelForCell,
   makeBoard,
   makePlayer,
-  resolveWormhole,
+  resolveCell,
   rollDice,
   type CardDef,
+  type RaceCell,
   type RacePlayer,
   type Roll,
   type TurnResult,
-  type WormholeOutcome,
 } from '../core/race';
 
 const HUD_W = 236;
@@ -50,6 +49,12 @@ const PANEL_W = 292;
 const GAP = 16;
 const SCENE_W = PANEL_W + GAP + ARENA_W + GAP + HUD_W;
 const SCENE_H = ARENA_H;
+
+/** Seconds the die tumbles before it settles. Short on purpose: it is a beat,
+ *  not a cutscene, and it plays every single turn. */
+const ROLL_SPIN = 0.9;
+/** Seconds per cell while the token walks the track. */
+const STEP_TIME = 0.11;
 
 export interface RaceOptions {
   names: string[];
@@ -59,7 +64,7 @@ export interface RaceOptions {
   speed?: number;
 }
 
-type Phase = 'board' | 'play' | 'result' | 'over';
+type Phase = 'board' | 'play' | 'roll' | 'move' | 'over';
 
 interface LogLine {
   text: string;
@@ -67,19 +72,21 @@ interface LogLine {
   t: number;
 }
 
-/** Hot-seat race: everyone shares one keyboard, one plays a short level at a
- *  time, and the rest spend influence on that level while it happens. */
+/** Hot-seat race: everyone shares one keyboard, one plays a short level against
+ *  a countdown, and the rest spend cards they earned in their own turns. */
 export function raceScene(app: App, opts: RaceOptions): Scene {
   const rng = new Rng(Date.now() >>> 0);
   const distance = opts.distance;
   const cells = makeBoard(distance, rng);
-  const players = opts.names.map((n, i) => makePlayer(i, n));
+  const players = opts.names.map((n, i) => makePlayer(i, n, rng));
   const backdrop = new Backdrop();
   const stepper = new FixedStepper();
   const speed = opts.speed ?? 1;
 
   let phase: Phase = 'board';
   let turnSeat = 0;
+  /** Flipped for the rest of the match by a reverse cell. */
+  let direction: 1 | -1 = 1;
   let round = 1;
   let arena: Arena | null = null;
   let fx = new ArenaFx();
@@ -96,8 +103,17 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   let paused = false;
   const log: LogLine[] = [];
 
+  // Roll and move animation state.
+  let rollT = 0;
+  let roll: Roll | null = null;
+  let rollFace = 1;
+  let movePath: number[] = [];
+  let moveTimer = 0;
+  let moveResolved = false;
+  let moveDone = false;
+  let trackEl: HTMLElement | null = null;
+
   music.setScene('menu');
-  fillHands();
   showBoard();
 
   function active(): RacePlayer {
@@ -108,22 +124,59 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     return p.cell >= distance;
   }
 
+  function clockSecondsFor(level: LevelData): number {
+    return level.boss ? BOSS_TURN_SECONDS : TURN_SECONDS;
+  }
+
+  function livesFor(level: LevelData): number {
+    return level.boss ? BOSS_TURN_LIVES : TURN_LIVES;
+  }
+
+  function levelFor(p: RacePlayer): LevelData {
+    return opts.levels[levelForCell(p.cell, distance, opts.levels.length)];
+  }
+
   function note(text: string, color: string): void {
     log.unshift({ text, color, t: 0 });
     if (log.length > 7) log.pop();
   }
 
-  /** Every empty, cooled-down slot draws a new card. */
-  function fillHands(): void {
-    for (const p of players) {
-      for (let i = 0; i < HAND_SIZE; i++) {
-        if (p.hand[i] === null && p.cool[i] <= 0) p.hand[i] = drawCard(rng);
-      }
-    }
+  // ------------------------------------------------------------- the track --
+
+  /** One chip per cell. Special cells stay face down until somebody lands on
+   *  one: the board is meant to be learned, not read off at the start. */
+  function cellChip(cell: RaceCell): HTMLElement {
+    const def = cell.kind && cell.revealed ? CELL_TYPES[cell.kind] : null;
+    const here = players.filter((p) => p.cell === cell.index);
+    return el(
+      'div',
+      {
+        class: `racecell${def ? ' known' : ''}${cell.index === distance ? ' finish' : ''}`,
+        style: def ? `--hole:${def.color}` : '',
+        title: def ? `${def.name}: ${def.desc}` : `Клетка ${cell.index}`,
+        'data-cell': String(cell.index),
+      },
+      el('span', { class: 'n' }, cell.index === distance ? '☠' : String(cell.index)),
+      def ? el('span', { class: 'icon' }, def.icon) : null,
+      here.length
+        ? el('span', { class: 'tokens' }, ...here.map((p) => el('i', { style: `background:${p.accent}` })))
+        : null,
+    );
   }
 
-  function levelFor(p: RacePlayer): LevelData {
-    return opts.levels[levelForCell(p.cell, distance, opts.levels.length)];
+  function buildTrack(): HTMLElement {
+    trackEl = el('div', { class: 'racetrack' }, ...cells.map(cellChip));
+    return trackEl;
+  }
+
+  /** Repaints one chip. The move animation touches two cells per step, so the
+   *  101-cell board is never rebuilt mid-walk — that is what would stutter on a
+   *  weaker laptop, and later on every spectator's screen. */
+  function refreshCell(index: number): void {
+    if (!trackEl) return;
+    const old = trackEl.children[index] as HTMLElement | undefined;
+    if (!old) return;
+    trackEl.replaceChild(cellChip(cells[index]), old);
   }
 
   // ------------------------------------------------------------- board UI --
@@ -133,6 +186,8 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const p = active();
     const level = levelFor(p);
     const finale = isFinale(p);
+    const seconds = Math.max(20, clockSecondsFor(level) + p.bonusSeconds);
+    const lives = livesFor(level) + p.bonusLives;
 
     app.overlay.classList.add('interactive');
     app.overlay.replaceChildren(
@@ -145,15 +200,27 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           { class: 'hint' },
           finale
             ? `Финальная клетка. Победит тот, кто снесёт ${level.name}. Проигрыш откидывает на ${FINALE_KNOCKBACK} клеток назад.`
-            : `Клетка ${p.cell} из ${distance} · уровень «${level.name}» · ${clockSecondsFor(level)} секунд · ${livesFor(level)} жизни. Сначала уровень, потом кубик.`,
+            : `Клетка ${p.cell} из ${distance} · уровень «${level.name}» · ${seconds} секунд · ${lives} жизни. Сначала уровень, потом кубик.`,
         ),
-        p.springDebt
-          ? el('p', { class: 'hint', style: 'color:var(--amber)' }, 'Долг катапульты: уровень начнётся с помехой.')
+        p.bonusSeconds !== 0 || p.bonusLives > 0 || p.springDebt
+          ? el(
+              'p',
+              { class: 'hint', style: 'color:var(--amber)' },
+              [
+                p.bonusSeconds > 0 ? `+${p.bonusSeconds} с с клетки` : '',
+                p.bonusSeconds < 0 ? `${p.bonusSeconds} с с клетки` : '',
+                p.bonusLives > 0 ? `+${p.bonusLives} жизней с клетки` : '',
+                p.springDebt ? 'долг катапульты: уровень начнётся с помехой' : '',
+              ]
+                .filter(Boolean)
+                .join(' · '),
+            )
           : null,
-        boardTrack(),
+        buildTrack(),
+        el('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Клетки закрыты, пока на них никто не встал. Что сработало — светится до конца матча уже для всех.'),
         standings(),
-        el('h3', { style: 'margin-top:18px' }, 'Кто чем бросается'),
-        el('p', { class: 'hint', style: 'margin-top:0' }, 'Пока идёт уровень, каждый ждущий игрок жмёт свои три клавиши. Карта уходит мгновенно — момент решает не меньше, чем сама карта.'),
+        el('h3', { style: 'margin-top:18px' }, 'Запас карт'),
+        el('p', { class: 'hint', style: 'margin-top:0' }, 'Карты не появляются сами: их ловят на своём уровне (капсула ★) и получают за зачистку. Что накопили — тем и бросаетесь в чужой ход, каждая на своей клавише.'),
         handsPreview(),
         pactRow(),
         el(
@@ -164,43 +231,6 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         ),
       ),
     );
-  }
-
-  function clockSecondsFor(level: LevelData): number {
-    return level.boss ? BOSS_TURN_SECONDS : TURN_SECONDS;
-  }
-
-  function livesFor(level: LevelData): number {
-    return level.boss ? BOSS_TURN_LIVES : TURN_LIVES;
-  }
-
-  /** The track itself: one chip per cell, wormholes coloured, tokens on top. */
-  function boardTrack(): HTMLElement {
-    const chips: HTMLElement[] = [];
-    for (const cell of cells) {
-      const hole = cell.hole && !cell.used ? WORMHOLES[cell.hole] : null;
-      const here = players.filter((p) => p.cell === cell.index);
-      chips.push(
-        el(
-          'div',
-          {
-            class: `racecell${hole ? ' hole' : ''}${cell.index === distance ? ' finish' : ''}`,
-            style: hole ? `--hole:${hole.color}` : '',
-            title: hole ? `${hole.name}: ${hole.desc}` : `Клетка ${cell.index}`,
-          },
-          el('span', { class: 'n' }, cell.index === distance ? '☠' : String(cell.index)),
-          hole ? el('span', { class: 'icon' }, hole.icon) : null,
-          here.length
-            ? el(
-                'span',
-                { class: 'tokens' },
-                ...here.map((p) => el('i', { style: `background:${p.accent}` })),
-              )
-            : null,
-        ),
-      );
-    }
-    return el('div', { class: 'racetrack' }, ...chips);
   }
 
   function standings(): HTMLElement {
@@ -215,7 +245,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
             class: 'pill',
             style: `border-color:${p.accent};color:${p.accent}${p.seat === turnSeat ? ';font-weight:800' : ''}`,
           },
-          `${p.name} · клетка ${p.cell} · влияние ${p.influence}${p.pact !== null ? ` · пакт с ${players[p.pact].name}` : ''}`,
+          `${p.name} · клетка ${p.cell} · карт ${p.stock.length}${p.pact !== null ? ` · пакт с ${players[p.pact].name}` : ''}`,
         ),
       ),
     );
@@ -231,16 +261,16 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           el(
             'div',
             { class: 'card', style: `border-color:${p.accent}44` },
-            el('div', { class: 'title', style: `color:${p.accent}` }, `${p.name} · ${p.influence}`),
-            ...p.hand.map((id, i) => {
-              if (!id) return el('div', { class: 'desc' }, `[${SEAT_KEY_LABELS[p.seat][i]}] — добор`);
+            el('div', { class: 'title', style: `color:${p.accent}` }, `${p.name} · карт ${p.stock.length}`),
+            ...Array.from({ length: HAND_SIZE }, (_, i) => {
+              const id = p.stock[i];
+              if (!id) return el('div', { class: 'desc' }, `[${SEAT_KEY_LABELS[p.seat][i]}] — пусто`);
               const def = CARDS[id];
-              const cost = cardCost(def, p, active());
               const banned = !cardAllowed(def, p, active());
               return el(
                 'div',
                 { class: 'desc', style: banned ? 'opacity:.4' : '' },
-                `[${SEAT_KEY_LABELS[p.seat][i]}] ${def.icon} ${def.name} — ${banned ? 'союзник' : `${cost} влияния`}`,
+                `[${SEAT_KEY_LABELS[p.seat][i]}] ${def.icon} ${def.name}${banned ? ' — союзник' : ''}`,
               );
             }),
           ),
@@ -249,7 +279,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   }
 
   /** Pacts are agreed out loud; this only records them. Mutual by construction,
-   *  and breaking one is deliberately expensive. */
+   *  and breaking one is public. */
   function pactRow(): HTMLElement {
     const free = players.filter((p) => p.pact === null);
     const rows: HTMLElement[] = [];
@@ -262,7 +292,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
             `Разорвать пакт ${p.name} — ${players[p.pact].name}`,
             () => {
               const ally = players[p.pact!];
-              p.influence = Math.max(0, Math.floor(p.influence / 2));
+              p.stock.splice(0, Math.ceil(p.stock.length / 2));
               ally.pact = null;
               p.pact = null;
               sfx.play('ui');
@@ -293,8 +323,41 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       'div',
       { style: 'margin-top:16px' },
       el('h3', {}, 'Альянсы'),
-      el('p', { class: 'hint', style: 'margin-top:0' }, 'Пока пакт держится, союзники не бьют друг друга, а бафы союзнику стоят вдвое дешевле. Разрыв стоит половины влияния и виден всем.'),
+      el('p', { class: 'hint', style: 'margin-top:0' }, `Пока пакт держится, союзники не могут бить друг друга, а за каждый зачищенный союзником уровень вы получаете карту. Жизни, собранные с клеток, можно отдать союзнику. Разрыв стоит половины запаса и виден всем.`),
       el('div', { class: 'row', style: 'gap:8px' }, ...(rows.length ? rows : [el('span', { class: 'hint' }, 'Все связаны пактами')])),
+      giftRow(),
+    );
+  }
+
+  /** Lives picked up from cells are not spent until your next turn, so up to
+   *  then they are transferable — an ally walking into a boss needs them more
+   *  than you do. */
+  function giftRow(): HTMLElement | null {
+    const donors = players.filter((p) => p.pact !== null && p.bonusLives > 0);
+    if (!donors.length) return null;
+
+    const give = (from: RacePlayer, n: number): void => {
+      const ally = players[from.pact!];
+      const moved = Math.min(n, from.bonusLives);
+      from.bonusLives -= moved;
+      ally.bonusLives += moved;
+      sfx.play('powerup');
+      showBoard();
+    };
+
+    const buttons: HTMLElement[] = [];
+    for (const p of donors) {
+      const ally = players[p.pact!];
+      buttons.push(
+        button(`${p.name} → ${ally.name}: 1 жизнь`, () => give(p, 1), 'btn small'),
+        button(`${p.name} → ${ally.name}: все ${p.bonusLives}`, () => give(p, p.bonusLives), 'btn small ghost'),
+      );
+    }
+    return el(
+      'div',
+      { style: 'margin-top:10px' },
+      el('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Передать жизни союзнику:'),
+      el('div', { class: 'row', style: 'gap:8px' }, ...buttons),
     );
   }
 
@@ -303,9 +366,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   function startTurn(): void {
     const p = active();
     const level = levelFor(p);
-    clockLimit = clockSecondsFor(level);
+    clockLimit = Math.max(20, clockSecondsFor(level) + p.bonusSeconds);
     clock = clockLimit;
-    livesAtStart = livesFor(level);
+    livesAtStart = livesFor(level) + p.bonusLives;
+    p.bonusSeconds = 0;
+    p.bonusLives = 0;
     bestCombo = 0;
     jamCharges = JAM_PER_TURN;
     shieldArmed = false;
@@ -315,9 +380,8 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     arena = new Arena({
       level,
       superId: opts.superId,
-      // Solo drops: the PvP sabotage capsules would charge up with nowhere to
-      // fire, since in a race only one field is live at a time.
-      mode: 'solo',
+      // Race drops: the ★ card capsule exists here and nowhere else.
+      mode: 'race',
       lives: livesAtStart,
     });
     arena.equipSkills(app.profile.skills);
@@ -342,7 +406,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   /** A waiting player pressed one of their three keys. */
   function playCard(from: RacePlayer, slot: number): void {
     if (!arena || phase !== 'play' || from.seat === turnSeat) return;
-    const id = from.hand[slot];
+    const id = from.stock[slot];
     if (!id) return;
     const def = CARDS[id];
     const target = active();
@@ -351,18 +415,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       note(`${from.name}: пакт не позволяет`, '#5a6472');
       return;
     }
-    const cost = cardCost(def, from, target);
-    if (from.influence < cost) {
-      note(`${from.name}: не хватает влияния (${cost})`, '#5a6472');
-      return;
-    }
 
-    from.influence -= cost;
-    from.hand[slot] = null;
-    from.cool[slot] = CARD_REDRAW;
+    from.stock.splice(slot, 1);
 
-    // The counter costs the thrower the card and the influence anyway — that is
-    // what makes baiting the block worth doing.
+    // The counter costs the thrower the card anyway — that is what makes
+    // baiting the block worth doing.
     if (shieldArmed && def.kind === 'debuff') {
       shieldArmed = false;
       note(`${target.name} отбил ${def.name}`, '#4de2ff');
@@ -390,12 +447,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       case 'dice':
         target.diceMod += def.effect.delta;
         break;
-      case 'tax': {
-        const taken = Math.min(target.influence, def.effect.amount);
-        target.influence -= taken;
-        from.influence += taken;
+      case 'clock':
+        clock = Math.max(1, clock + def.effect.delta);
+        clockLimit = Math.max(clockLimit, clock);
         break;
-      }
     }
     fx.text(ARENA_W / 2, def.kind === 'buff' ? 220 : 260, `${def.icon} ${def.name.toUpperCase()}`, def.color);
     note(`${from.name} → ${def.name}`, def.color);
@@ -430,30 +485,27 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       livesLost: Math.max(0, livesAtStart - arena.lives),
       bestCombo,
       bricks: arena.bricksBroken,
+      boss: arena.level.boss !== undefined && arena.level.boss !== null,
     };
     p.turns++;
     if (cleared) p.cleared++;
 
-    // Every turn pays: the player from their bricks, the table from waiting.
-    p.influence += influenceForTurn(result);
-    for (const other of players) if (other !== p) other.influence += IDLE_INFLUENCE;
+    const earned = giveCards(p, cardsForTurn(result), rng);
+    if (earned > 0) note(`+${earned} карт за зачистку`, '#ffd24d');
+    if (cleared && p.pact !== null) giveCards(players[p.pact], ALLY_CARDS, rng);
     app.saveProfile((prof) => (prof.totalXp += Math.round(arena!.xpEarned)));
 
     if (isFinale(p)) return finishFinale(p, result);
 
-    // Losing the balls costs the whole move: no die, no step.
-    const roll = result.died ? null : rollDice(rng, result, p.diceMod);
-    p.diceMod = 0;
-    const before = p.cell;
-    if (roll) p.cell = Math.min(distance, p.cell + roll.total);
-
-    let hole: WormholeOutcome | null = null;
-    const cell = cells[p.cell];
-    if (roll && cell && cell.hole && !cell.used && p.cell !== distance) {
-      cell.used = true;
-      hole = resolveWormhole(cell.hole, p, players, distance, rng);
+    // Death costs the whole move: no die, no step, straight to the next player.
+    if (died) {
+      roll = null;
+      showRoll();
+      return;
     }
-    showResult(result, roll, before, hole, false);
+    roll = rollDice(rng, result, p.diceMod);
+    p.diceMod = 0;
+    showRoll();
   }
 
   function finishFinale(p: RacePlayer, result: TurnResult): void {
@@ -464,61 +516,127 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       showOver(p);
       return;
     }
+    const before = p.cell;
     p.cell = Math.max(0, distance - FINALE_KNOCKBACK);
-    showResult(result, null, distance, null, true);
+    roll = null;
+    startMove(before, p.cell, 'Мега-босс устоял');
   }
 
-  function showResult(
-    result: TurnResult,
-    roll: Roll | null,
-    before: number,
-    hole: WormholeOutcome | null,
-    knockback: boolean,
-  ): void {
-    phase = 'result';
-    const p = active();
-    const lines: string[] = [];
+  // ------------------------------------------------------- roll and move --
 
-    if (result.died) lines.push('Мячи потеряны — ход сгорел, кубик не бросается.');
-    else if (result.cleared) lines.push(`Уровень зачищен за ${Math.round(clockLimit - result.timeLeft)} с.`);
-    else lines.push('Время вышло: уровень не добит.');
+  function showRoll(): void {
+    phase = 'roll';
+    rollT = 0;
+    rollFace = 1;
+    app.overlay.replaceChildren();
+    app.overlay.classList.remove('interactive');
+    sfx.play('ui');
+  }
 
-    if (roll) {
-      const bonusText = roll.bonuses.length
-        ? roll.bonuses.map((b) => `${b.value > 0 ? '+' : ''}${b.value} ${b.label}`).join(' · ')
-        : 'без бонусов';
-      lines.push(`Кубик: ${roll.die} · ${bonusText} → ход на ${roll.total}`);
-      lines.push(`Клетка ${before} → ${p.cell}`);
-    } else if (knockback) {
-      lines.push(`Мега-босс устоял: откат на клетку ${p.cell}.`);
-    }
-    if (hole) lines.push(`${WORMHOLES[hole.kind].icon} ${hole.text}`);
-
-    const leader = [...players].sort((a, b) => b.cell - a.cell)[0];
-    lines.push(`Впереди: ${leader.name} (клетка ${leader.cell}). Влияние ${p.name}: ${p.influence}.`);
-
+  /** Walks the token from one cell to another, one step at a time, and lets the
+   *  landing cell fire when it arrives. */
+  function startMove(from: number, to: number, headline: string): void {
+    phase = 'move';
+    movePath = [];
+    const step = to >= from ? 1 : -1;
+    for (let c = from + step; step > 0 ? c <= to : c >= to; c += step) movePath.push(c);
+    moveTimer = 0;
+    moveDone = movePath.length === 0;
     app.overlay.classList.add('interactive');
     app.overlay.replaceChildren(
       el(
         'div',
-        { class: 'screen narrow' },
-        el('h2', { style: `color:${p.accent}` }, `${p.name}: итог хода`),
-        ...lines.map((l) => el('p', { class: 'hint' }, l)),
-        el(
-          'div',
-          { class: 'row', style: 'margin-top:18px' },
-          button('Следующий игрок', nextTurn, 'btn primary'),
-          button('В меню', () => app.setScene(mainMenu), 'btn ghost'),
-        ),
+        { class: 'screen' },
+        el('h2', { style: `color:${active().accent}`, id: 'move-title' }, headline),
+        el('p', { class: 'hint', id: 'move-line' }, `Клетка ${from} → ${to}`),
+        buildTrack(),
+        el('div', { class: 'row', style: 'margin-top:18px', id: 'move-actions' }),
+      ),
+    );
+    if (moveDone) finishMove();
+  }
+
+  function stepMove(dt: number): void {
+    if (moveDone) return;
+    moveTimer += dt;
+    while (moveTimer >= STEP_TIME && movePath.length) {
+      moveTimer -= STEP_TIME;
+      const p = active();
+      const was = p.cell;
+      p.cell = movePath.shift()!;
+      refreshCell(was);
+      refreshCell(p.cell);
+      sfx.play('paddle');
+    }
+    if (movePath.length) return;
+
+    // Arrived. The cell under the token fires once — and a cell that moved us
+    // does not get to chain into a second one.
+    const p = active();
+    const cell = cells[p.cell];
+    if (!moveResolved && cell && cell.kind && p.cell !== distance) {
+      moveResolved = true;
+      const wasRevealed = cell.revealed;
+      cell.revealed = true;
+      const before = p.cell;
+      const outcome = resolveCell(cell.kind, p, players, distance, rng);
+      if (outcome.reversed) direction = direction === 1 ? -1 : 1;
+      refreshCell(before);
+      for (const other of players) refreshCell(other.cell);
+      const def = CELL_TYPES[cell.kind];
+      sfx.play(outcome.delta < 0 || cell.kind === 'toll' ? 'garbage' : 'powerup');
+      setText('move-title', `${def.icon} ${def.name}`, def.color);
+      setText('move-line', `${outcome.text}${wasRevealed ? '' : ' · клетка открыта для всех'}`);
+      if (outcome.delta !== 0 || outcome.swappedWith !== null) {
+        startMoveContinuation(before, p.cell);
+        return;
+      }
+    }
+    finishMove();
+  }
+
+  /** Second hop: the cell threw us somewhere, so walk that too. */
+  function startMoveContinuation(from: number, to: number): void {
+    movePath = [];
+    const step = to >= from ? 1 : -1;
+    for (let c = from + step; step > 0 ? c <= to : c >= to; c += step) movePath.push(c);
+    moveTimer = 0;
+    if (!movePath.length) finishMove();
+  }
+
+  function setText(id: string, text: string, color?: string): void {
+    const node = app.overlay.querySelector(`#${id}`) as HTMLElement | null;
+    if (!node) return;
+    node.textContent = text;
+    if (color) node.style.color = color;
+  }
+
+  function finishMove(): void {
+    moveDone = true;
+    const p = active();
+    const leader = [...players].sort((a, b) => b.cell - a.cell)[0];
+    const actions = app.overlay.querySelector('#move-actions');
+    if (!actions || actions.childElementCount) return;
+    actions.append(
+      button('Следующий игрок', nextTurn, 'btn primary'),
+      button('В меню', () => app.setScene(mainMenu), 'btn ghost'),
+    );
+    const line = app.overlay.querySelector('#move-line');
+    line?.after(
+      el(
+        'p',
+        { class: 'hint' },
+        `${p.name}: клетка ${p.cell} · карт ${p.stock.length}. Впереди ${leader.name} (клетка ${leader.cell}).`,
       ),
     );
   }
 
   function nextTurn(): void {
     arena = null;
-    turnSeat = (turnSeat + 1) % players.length;
+    roll = null;
+    moveResolved = false;
+    turnSeat = (turnSeat + direction + players.length) % players.length;
     if (turnSeat === 0) round++;
-    fillHands();
     music.setScene('menu');
     showBoard();
   }
@@ -602,24 +720,28 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     ctx.font = `800 15px ${FONT}`;
     ctx.fillText(`${p.name} · клетка ${p.cell}/${distance}`, pad, 24);
 
-    // Turn clock.
-    const frac = Math.max(0, clock / clockLimit);
+    // Turn clock: the number the whole turn is fighting, so it is drawn big.
+    const frac = Math.max(0, Math.min(1, clock / clockLimit));
+    const low = clock <= 15;
     ctx.fillStyle = 'rgba(255,255,255,0.08)';
     ctx.beginPath();
-    ctx.roundRect(pad, 34, w - pad * 2, 8, 4);
+    ctx.roundRect(pad, 34, w - pad * 2, 10, 5);
     ctx.fill();
-    ctx.fillStyle = clock < 15 ? '#ff4d6d' : '#3ddc84';
+    ctx.fillStyle = low ? '#ff4d6d' : '#3ddc84';
     ctx.beginPath();
-    ctx.roundRect(pad, 34, (w - pad * 2) * frac, 8, 4);
+    ctx.roundRect(pad, 34, (w - pad * 2) * frac, 10, 5);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillStyle = low ? '#ff4d6d' : '#ffffff';
+    ctx.font = `800 30px ${FONT}`;
+    ctx.fillText(`${Math.ceil(Math.max(0, clock))}`, pad, 78);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.font = `600 11px ${FONT}`;
-    ctx.fillText(`${Math.ceil(clock)} с до конца хода`, pad, 58);
+    ctx.fillText('секунд до конца хода', pad + 48, 78);
 
     ctx.fillStyle = shieldArmed ? '#4de2ff' : 'rgba(255,255,255,0.35)';
-    ctx.fillText(shieldArmed ? 'ЩИТ ПОДНЯТ — отобьёт одну карту' : `R — щит (осталось ${jamCharges})`, pad, 74);
+    ctx.fillText(shieldArmed ? 'ЩИТ ПОДНЯТ — отобьёт одну карту' : `R — щит (осталось ${jamCharges})`, pad, 96);
 
-    let ty = 98;
+    let ty = 122;
     for (const other of players) {
       if (other.seat === turnSeat) continue;
       ctx.fillStyle = other.accent;
@@ -628,32 +750,32 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.font = `600 11px ${FONT}`;
-      ctx.fillText(`${other.influence} влияния`, w - pad, ty);
+      ctx.fillText(`карт ${other.stock.length}`, w - pad, ty);
       ctx.textAlign = 'left';
       ty += 6;
 
       for (let i = 0; i < HAND_SIZE; i++) {
         ty += 17;
-        const id = other.hand[i];
+        const id = other.stock[i];
         const key = SEAT_KEY_LABELS[other.seat]?.[i] ?? '?';
         if (!id) {
           ctx.fillStyle = 'rgba(255,255,255,0.22)';
           ctx.font = `600 11px ${FONT}`;
-          ctx.fillText(`${key} — добор ${Math.ceil(other.cool[i])} с`, pad + 4, ty);
+          ctx.fillText(`${key} — пусто`, pad + 4, ty);
           continue;
         }
         const def = CARDS[id];
-        const cost = cardCost(def, other, p);
         const banned = !cardAllowed(def, other, p);
-        const affordable = other.influence >= cost && !banned;
-        ctx.globalAlpha = affordable ? 1 : 0.38;
+        ctx.globalAlpha = banned ? 0.38 : 1;
         ctx.fillStyle = def.color;
         ctx.font = `700 11px ${FONT}`;
         ctx.fillText(`${key}  ${def.icon} ${def.name}`, pad + 4, ty);
-        ctx.textAlign = 'right';
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText(banned ? 'союзник' : String(cost), w - pad, ty);
-        ctx.textAlign = 'left';
+        if (banned) {
+          ctx.textAlign = 'right';
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.fillText('союзник', w - pad, ty);
+          ctx.textAlign = 'left';
+        }
         ctx.globalAlpha = 1;
       }
       ty += 22;
@@ -672,17 +794,131 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     ctx.restore();
   }
 
+  /** The die, drawn big in the middle of the screen. */
+  function drawDie(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, face: number, wobble: number): void {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(wobble);
+    ctx.fillStyle = '#f2f6ff';
+    ctx.strokeStyle = '#4de2ff';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(77,226,255,0.55)';
+    ctx.shadowBlur = 34;
+    ctx.beginPath();
+    ctx.roundRect(-size / 2, -size / 2, size, size, size * 0.18);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    const u = size / 4;
+    const pips: [number, number][][] = [
+      [[0, 0]],
+      [[-u, -u], [u, u]],
+      [[-u, -u], [0, 0], [u, u]],
+      [[-u, -u], [u, -u], [-u, u], [u, u]],
+      [[-u, -u], [u, -u], [0, 0], [-u, u], [u, u]],
+      [[-u, -u], [u, -u], [-u, 0], [u, 0], [-u, u], [u, u]],
+    ];
+    ctx.fillStyle = '#0b1226';
+    for (const [px, py] of pips[Math.min(5, Math.max(0, face - 1))]) {
+      ctx.beginPath();
+      ctx.arc(px, py, size * 0.075, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawRollScreen(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    backdrop.draw(ctx, w, h);
+    const cx = w / 2;
+    const p = active();
+    const spinning = rollT < ROLL_SPIN;
+    // Everything scales with the window: on a short laptop screen the die must
+    // not grow into the text under it.
+    const s = Math.min(1, h / 720);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = p.accent;
+    ctx.font = `800 ${22 * s}px ${FONT}`;
+    ctx.fillText(`${p.name.toUpperCase()} БРОСАЕТ КУБИК`, cx, h * 0.12);
+
+    if (!roll) {
+      // Death: no die at all, just the verdict.
+      ctx.fillStyle = '#ff4d6d';
+      ctx.font = `900 ${46 * s}px ${FONT}`;
+      ctx.fillText('МЯЧИ ПОТЕРЯНЫ', cx, h * 0.44);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = `600 ${18 * s}px ${FONT}`;
+      ctx.fillText('Ход сгорел — кубик не бросается', cx, h * 0.54);
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = `600 ${14 * s}px ${FONT}`;
+      ctx.fillText('Пробел или клик — дальше', cx, h * 0.72);
+      ctx.restore();
+      return;
+    }
+
+    const size = (spinning ? 132 + Math.sin(rollT * 30) * 8 : 148) * s;
+    const wobble = spinning ? Math.sin(rollT * 22) * 0.25 : 0;
+    drawDie(ctx, cx, h * 0.34, size, spinning ? rollFace : roll.die, wobble);
+
+    if (spinning) {
+      ctx.restore();
+      return;
+    }
+
+    ctx.fillStyle = '#ffd24d';
+    ctx.font = `700 ${17 * s}px ${FONT}`;
+    ctx.fillText(roll.line, cx, h * 0.34 + size * 0.5 + 30 * s);
+
+    let by = h * 0.34 + size * 0.5 + 58 * s;
+    for (const b of roll.bonuses) {
+      ctx.fillStyle = b.value > 0 ? '#3ddc84' : '#ff4d6d';
+      ctx.font = `700 ${15 * s}px ${FONT}`;
+      ctx.fillText(`${b.value > 0 ? '+' : ''}${b.value} · ${b.label}`, cx, by);
+      by += 22 * s;
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `900 ${64 * s}px ${FONT}`;
+    ctx.fillText(`ХОД НА ${roll.total}`, cx, by + 58 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = `600 ${14 * s}px ${FONT}`;
+    ctx.fillText('Пробел или клик — шагаем', cx, by + 92 * s);
+    ctx.restore();
+  }
+
+  function advanceFromRoll(): void {
+    const p = active();
+    const before = p.cell;
+    if (!roll) {
+      // Nothing to walk: hand over straight away.
+      startMove(before, before, 'Ход сгорел');
+      return;
+    }
+    const to = Math.min(distance, p.cell + roll.total);
+    startMove(before, to, `${p.name}: ход на ${roll.total}`);
+  }
+
   return {
     update(dt) {
       t += dt;
       for (const line of log) line.t += dt;
-      for (const p of players) {
-        for (let i = 0; i < HAND_SIZE; i++) {
-          if (p.hand[i] === null && p.cool[i] > 0) {
-            p.cool[i] -= dt;
-            if (p.cool[i] <= 0) p.hand[i] = drawCard(rng);
-          }
+
+      if (phase === 'roll') {
+        rollT += dt;
+        if (rollT < ROLL_SPIN) {
+          // Cheap tumble: a new face every other frame, no physics.
+          if (Math.floor(rollT * 18) !== Math.floor((rollT - dt) * 18)) rollFace = rng.int(1, 7);
+        } else if (app.input.anyPressed() || app.input.clicked) {
+          advanceFromRoll();
         }
+        return;
+      }
+
+      if (phase === 'move') {
+        stepMove(dt);
+        return;
       }
 
       if (phase !== 'play') {
@@ -714,6 +950,14 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       const events = arena.drainEvents();
       fx.consume(events);
       sfx.consume(events, arena.combo);
+      for (const e of events) {
+        // Cards are earned at the paddle, never handed out by a timer.
+        if (e.t === 'powerup' && e.id === 'card') {
+          const p = active();
+          if (giveCards(p, 1, rng) > 0) note(`${p.name}: +1 карта в запас`, '#ffd24d');
+          else note(`Запас полон (${STOCK_MAX})`, '#5a6472');
+        }
+      }
       bestCombo = Math.max(bestCombo, arena.combo);
 
       // The draft freezes the clock: choosing a perk must not cost the turn.
@@ -725,6 +969,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     },
 
     draw(ctx, w, h) {
+      if (phase === 'roll') {
+        drawRollScreen(ctx, w, h);
+        return;
+      }
       if (phase !== 'play' || !arena) {
         backdrop.draw(ctx, w, h);
         return;
@@ -747,6 +995,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         accent: active().accent,
         subtitle: `${arena.level.name} · круг ${round}`,
         fps: app.fps,
+        countdown: { label: 'ДО КОНЦА ХОДА', seconds: clock },
       });
       ctx.restore();
     },

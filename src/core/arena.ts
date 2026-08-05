@@ -45,7 +45,7 @@ import { POWERUP_LIST, POWERUPS, type FallingPowerup, type PowerupId } from './p
 import { SUPERS, type SuperId } from './supers';
 import { baseStats, rollPerks, xpForLevel, XP_RATE, type Perk, type RunStats } from './progression';
 
-export type ArenaMode = 'solo' | 'versus';
+export type ArenaMode = 'solo' | 'versus' | 'race';
 
 export type ArenaState = 'serve' | 'play' | 'levelup' | 'spec' | 'cleared' | 'dead';
 
@@ -1141,6 +1141,7 @@ export class Arena {
     for (const def of POWERUP_LIST) {
       // Sabotage capsules exist only where there is someone to sabotage.
       if (def.pvpOnly && this.mode !== 'versus') continue;
+      if (def.raceOnly && this.mode !== 'race') continue;
       for (let i = 0; i < def.weight; i++) pool.push(def.id);
     }
     const id = this.rng.pick(pool);
