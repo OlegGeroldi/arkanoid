@@ -32,6 +32,8 @@ import { hall } from '../core/hall';
 import { ALL_ENTRIES, type StoryEntry } from '../core/story';
 import { net } from '../net/client';
 import { netVersusScene } from '../game/netVersus';
+import { raceScene } from '../game/race';
+import { RACE_DISTANCES, SEAT_KEY_LABELS } from '../core/race';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -150,6 +152,12 @@ export function mainMenu(app: App): Scene {
                 ngPlus: a.profile.ngPlus,
               }),
             ),
+          ),
+          modeCard(
+            '🎲',
+            'Гонка',
+            'Настолка на 2–6 игроков: кубик, червоточины, бафы и дебафы в чужой уровень',
+            () => screenRace(),
           ),
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),
@@ -529,6 +537,120 @@ export function mainMenu(app: App): Scene {
               'btn primary',
             ),
             button('Назад', opts.campaign ? screenLevelSelect : screenMain, 'btn ghost'),
+          ),
+        ),
+      );
+    };
+    render();
+  }
+
+  // ------------------------------------------------------------ race setup --
+
+  function screenRace(): void {
+    let count = 2;
+    const names: string[] = ['Игрок 1', 'Игрок 2', 'Игрок 3', 'Игрок 4', 'Игрок 5', 'Игрок 6'];
+    names[0] = app.profile.name;
+    let distance: number = RACE_DISTANCES[0];
+
+    const render = (): void => {
+      show(
+        el(
+          'div',
+          { class: 'screen' },
+          el('h2', {}, '🎲 Гонка'),
+          el(
+            'p',
+            { class: 'hint' },
+            'Ходят по очереди на одном компьютере. Свой ход — короткий уровень; чужой — трансляция, в которую вы бросаете карты. Сначала уровень, потом кубик: d6 плюс то, что вы наиграли.',
+          ),
+          el(
+            'p',
+            { class: 'hint' },
+            `Каждые 3–5 клеток — червоточина: прыжок вперёд, провал назад, рулетка, обмен местами или катапульта. На последней клетке ждёт DOH — только его смерть заканчивает гонку.`,
+          ),
+
+          el('h3', { style: 'margin-top:16px' }, 'Игроки'),
+          el(
+            'div',
+            { class: 'row', style: 'gap:6px' },
+            ...[2, 3, 4, 5, 6].map((n) =>
+              button(
+                `${n}`,
+                () => {
+                  count = n;
+                  sfx.play('ui');
+                  render();
+                },
+                `btn small${count === n ? ' primary' : ''}`,
+              ),
+            ),
+          ),
+          el(
+            'div',
+            { class: 'grid c3', style: 'margin-top:10px' },
+            ...names.slice(0, count).map((n, i) =>
+              el(
+                'label',
+                { class: 'field' },
+                `Место ${i + 1} · клавиши ${SEAT_KEY_LABELS[i].join(' ')}`,
+                el('input', {
+                  type: 'text',
+                  value: n,
+                  oninput: (e: Event) => {
+                    names[i] = (e.target as HTMLInputElement).value || `Игрок ${i + 1}`;
+                  },
+                }),
+              ),
+            ),
+          ),
+
+          el('h3', { style: 'margin-top:16px' }, 'Дистанция'),
+          el(
+            'div',
+            { class: 'row', style: 'gap:6px' },
+            ...RACE_DISTANCES.map((d) =>
+              button(
+                d === 20 ? '20 · блиц' : d === 50 ? '50 · стандарт' : '100 · полная',
+                () => {
+                  distance = d;
+                  sfx.play('ui');
+                  render();
+                },
+                `btn small${distance === d ? ' primary' : ''}`,
+              ),
+            ),
+          ),
+          el(
+            'p',
+            { class: 'hint', style: 'margin-top:6px' },
+            'Трасса растянута на всю кампанию: даже блиц заканчивается мега-боссом.',
+          ),
+
+          el('h3', { style: 'margin-top:16px' }, 'Клавиши во время чужого хода'),
+          el(
+            'p',
+            { class: 'hint', style: 'margin-top:0' },
+            'Три карты на руках, по клавише на каждую. Сыгранная карта возвращается через 7 секунд — за один ход всё не выложить. Тот, кто играет, жмёт R и один раз за ход отбивает входящую карту, но влияние с бросавшего всё равно спишется.',
+          ),
+
+          el(
+            'div',
+            { class: 'row', style: 'margin-top:20px' },
+            button(
+              'Начать гонку',
+              () =>
+                app.setScene((a) =>
+                  raceScene(a, {
+                    names: names.slice(0, count),
+                    distance,
+                    levels: a.campaignLevels(),
+                    superId: a.profile.favouriteSuper,
+                    speed: a.profile.gameSpeed,
+                  }),
+                ),
+              'btn primary',
+            ),
+            button('Назад', screenMain, 'btn ghost'),
           ),
         ),
       );
