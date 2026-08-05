@@ -612,6 +612,15 @@ export class Arena {
     // ends when the boss does.
     if (this.boss && !this.boss.dead) return;
 
+    // And once it does, the level is over whatever is left standing. A boss
+    // spends the fight dropping rows, so demanding an empty field afterwards
+    // would mean mopping up its own debris to be allowed to win.
+    if (this.boss?.dead && this.lives > 0) {
+      this.state = 'cleared';
+      this.events.push({ t: 'cleared' });
+      return;
+    }
+
     // Losing the last ball on the same tick that empties the field counts as death.
     if (this.remaining <= 0 && this.lives > 0) {
       this.state = 'cleared';
