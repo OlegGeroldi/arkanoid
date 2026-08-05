@@ -355,3 +355,19 @@ p.story {
 /* Tokens sit under the number so a stack of players stays readable. */
 .racecell .tokens { position: absolute; bottom: 2px; left: 0; right: 0; display: flex; justify-content: center; gap: 2px; }
 .racecell .tokens i { width: 5px; height: 5px; border-radius: 50%; display: block; }
+
+/* Race commentary: the table read out loud after every move. Quoted rather
+   than bulleted — it is a voice, not a list of facts. */
+.commentary {
+  border-left: 2px solid var(--cyan);
+  padding: 2px 0 2px 12px;
+  margin: 12px 0 0;
+}
+.commentary p {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.commentary p:first-child { color: var(--cyan); }
+.commentary p:last-child { margin-bottom: 0; }

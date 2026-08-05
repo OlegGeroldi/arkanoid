@@ -185,8 +185,13 @@ export const SKILLS: Record<SkillId, SkillDef> = {
 export const SKILL_LIST: SkillDef[] = Object.values(SKILLS);
 
 /** Cooldown at a given rank: each rank past the first trims 15%. */
+/** Global cooldown scale. Halved on Oleg's call: abilities that come round once
+ *  a minute were being carried unused into the next level, and in a race turn of
+ *  75 seconds a 60-second skill fired at most once. */
+export const COOLDOWN_SCALE = 0.5;
+
 export const skillCooldown = (def: SkillDef, rank: number): number =>
-  def.cooldown * Math.pow(0.85, Math.max(0, rank - 1));
+  def.cooldown * COOLDOWN_SCALE * Math.pow(0.85, Math.max(0, rank - 1));
 
 /** Duration at a given rank: rank II adds a flat bonus, rank III keeps it. */
 export function skillDuration(def: SkillDef, rank: number): number {

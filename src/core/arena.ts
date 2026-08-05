@@ -391,7 +391,11 @@ export class Arena {
    *  would restore the shield and the fight could never end. */
   get bossShielded(): boolean {
     if (!this.boss || !this.boss.def.shielded) return false;
-    return this.bricks.some((b) => b.alive && b.kind.hp > 0 && b.kind.code !== 'b');
+    // Only the level's own bricks are a shield. Anything pushed in later — the
+    // boss's own mixed wall, an opponent's steel row, a race card — must not
+    // re-arm it: a boss that pushes every seven seconds would otherwise make
+    // itself permanently invulnerable and the level unfinishable.
+    return this.bricks.some((b) => b.alive && b.kind.hp > 0 && !b.pushed);
   }
 
   private updateBoss(dt: number): void {
@@ -1653,6 +1657,7 @@ export class Arena {
         regenTimer: 0,
         regensLeft: 0,
         flash: 1,
+        pushed: true,
       };
       this.bricks.push(brick);
       this.grid[c] = brick;

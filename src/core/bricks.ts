@@ -66,4 +66,7 @@ export interface Brick {
   regensLeft: number;
   /** Hit feedback, seconds. */
   flash: number;
+  /** Arrived from a garbage push rather than from the level. A boss shield is
+   *  made of the level's bricks only, so these never count towards it. */
+  pushed?: boolean;
 }

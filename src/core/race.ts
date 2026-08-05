@@ -337,6 +337,181 @@ export function cardsForTurn(r: TurnResult): number {
   return r.boss ? BOSS_CLEAR_CARDS : CLEAR_CARDS;
 }
 
+// ------------------------------------------------------------- commentary ---
+
+/** Positions before the move, seat -> cell. */
+export type Standings = Map<number, number>;
+
+export function snapshot(players: RacePlayer[]): Standings {
+  return new Map(players.map((p) => [p.seat, p.cell]));
+}
+
+// Player names are free text, so no line may bend one into another case or
+// assume a gender: every template keeps the name in the nominative and builds
+// the sentence around it. "Обходит Машу" would need declension we cannot do.
+// Numbers do have to agree, though, hence the two forms of "клетка".
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(n) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+/** "на 1 клетку", "на 2 клетки", "на 5 клеток" */
+const cellsAcc = (n: number): string => `${n} ${plural(n, 'клетку', 'клетки', 'клеток')}`;
+/** "осталась 1 клетка", "осталось 5 клеток" */
+const cellsNom = (n: number): string => `${n} ${plural(n, 'клетка', 'клетки', 'клеток')}`;
+
+const LEAD_TAKEN = [
+  (x: string, y: string) => `${x} выходит вперёд, ${y} — на вторую строчку`,
+  (x: string, y: string) => `Лидер сменился: впереди ${x}, следом ${y}`,
+  (x: string, y: string) => `Первая строчка — ${x}. ${y} уступает`,
+  (x: string) => `${x} возглавляет гонку`,
+];
+
+const LEAD_KEPT = [
+  (x: string, n: number) => `${x} отрывается на ${cellsAcc(n)}`,
+  (x: string, n: number) => `Отрыв растёт — ${x} впереди на ${cellsAcc(n)}`,
+  (x: string, n: number) => `${x} идёт первым: преимущество в ${cellsAcc(n)}`,
+];
+
+const OVERTAKE = [
+  (x: string, y: string) => `${x} обгоняет — ${y} остаётся позади`,
+  (x: string, y: string) => `Позиции поменялись: ${x} выше, ${y} ниже`,
+  (x: string, y: string) => `${x} проходит вперёд, ${y} пропускает`,
+];
+
+const TO_LAST = [
+  (x: string) => `${x} теперь замыкает гонку`,
+  (x: string) => `${x} становится самым последним`,
+  (x: string) => `Последняя строчка — ${x}`,
+];
+
+const OFF_LAST = [
+  (x: string) => `${x} выбирается с последнего места`,
+  (x: string) => `${x} больше не замыкает таблицу`,
+];
+
+const BEHIND = [
+  (x: string, y: string, n: number) => `${x} позади на ${cellsAcc(n)}, впереди ${y}`,
+  (x: string, y: string, n: number) => `Отставание в ${cellsAcc(n)}: лидер ${y}, следом ${x}`,
+];
+
+const LEAD_THIN = [
+  (x: string, n: number) => `${x} первый, но отрыв всего ${cellsNom(n)}`,
+  (x: string, n: number) => `${x} впереди — преимущество пока ${cellsNom(n)}`,
+];
+
+const TIED = [
+  (x: string, y: string) => `${x} и ${y} на одной клетке — ноздря в ноздрю`,
+  (x: string, y: string) => `Одна клетка на двоих: ${x} и ${y}`,
+];
+
+const SETBACK = [
+  (x: string, n: number) => `${x} — назад на ${cellsAcc(n)}`,
+  (x: string, n: number) => `Откат: ${x} теряет ${cellsAcc(n)}`,
+  (x: string, n: number) => `Трасса наказывает: ${x} минус ${cellsAcc(n)}`,
+];
+
+const SURGE = [
+  (x: string, n: number) => `${x} прыгает вперёд сразу на ${cellsAcc(n)}`,
+  (x: string, n: number) => `Сразу на ${cellsAcc(n)} — это ${x}`,
+];
+
+const HALFWAY = [
+  (x: string) => `${x}: половина трассы позади`,
+  (x: string) => `Половина трассы пройдена: ${x}`,
+];
+
+const NEAR_END = [
+  (x: string, n: number) => `${x} — до мега-босса ${cellsNom(n)}`,
+  (x: string, n: number) => `${x} уже видит DOH: осталось ${cellsNom(n)}`,
+];
+
+const AT_END = [
+  (x: string) => `${x} на последней клетке — следующий ход за мега-босса`,
+  (x: string) => `${x} у самого DOH. Дальше только он`,
+];
+
+/** What the table looks like after a move, said out loud. Positions are
+ *  compared with the snapshot taken before the turn, so a swap or a pit shows
+ *  up here as readily as a good roll.
+ *
+ *  Only a couple of lines come back: a commentator who says everything says
+ *  nothing. */
+export function raceComments(
+  before: Standings,
+  players: RacePlayer[],
+  mover: RacePlayer,
+  distance: number,
+  rng: Rng,
+): string[] {
+  const out: string[] = [];
+  const name = (p: RacePlayer): string => p.name;
+  const rank = (cells: Standings): RacePlayer[] =>
+    [...players].sort((a, b) => (cells.get(b.seat) ?? 0) - (cells.get(a.seat) ?? 0));
+
+  const now = snapshot(players);
+  const wasOrder = rank(before);
+  const nowOrder = rank(now);
+  const delta = (now.get(mover.seat) ?? 0) - (before.get(mover.seat) ?? 0);
+
+  // A change at the top always leads.
+  if (nowOrder[0] === mover && wasOrder[0] !== mover) {
+    out.push(rng.pick(LEAD_TAKEN)(name(mover), name(wasOrder[0])));
+  } else if (nowOrder[0] === mover && nowOrder.length > 1) {
+    const gap = mover.cell - nowOrder[1].cell;
+    if (gap >= 3) out.push(rng.pick(LEAD_KEPT)(name(mover), gap));
+  } else {
+    // Whoever the mover physically passed this turn.
+    const passed = players.filter(
+      (p) =>
+        p !== mover &&
+        (before.get(mover.seat) ?? 0) <= (before.get(p.seat) ?? 0) &&
+        mover.cell > p.cell,
+    );
+    if (passed.length) out.push(rng.pick(OVERTAKE)(name(mover), name(rng.pick(passed))));
+  }
+
+  // Movement worth remarking on by itself.
+  if (delta <= -4) out.push(rng.pick(SETBACK)(name(mover), -delta));
+  else if (delta >= 7) out.push(rng.pick(SURGE)(name(mover), delta));
+
+  // The bottom of the table.
+  const wasLast = wasOrder[wasOrder.length - 1];
+  const nowLast = nowOrder[nowOrder.length - 1];
+  if (nowLast !== wasLast) {
+    if (nowLast === mover) out.push(rng.pick(TO_LAST)(name(mover)));
+    else if (wasLast === mover) out.push(rng.pick(OFF_LAST)(name(mover)));
+    else out.push(rng.pick(TO_LAST)(name(nowLast)));
+  }
+
+  // Milestones, only the first time they are crossed.
+  const half = Math.floor(distance / 2);
+  if ((before.get(mover.seat) ?? 0) < half && mover.cell >= half && mover.cell < distance) {
+    out.push(rng.pick(HALFWAY)(name(mover)));
+  }
+  if (mover.cell >= distance) {
+    out.push(rng.pick(AT_END)(name(mover)));
+  } else if (distance - mover.cell <= 5 && distance - (before.get(mover.seat) ?? 0) > 5) {
+    out.push(rng.pick(NEAR_END)(name(mover), distance - mover.cell));
+  }
+
+  // Nothing dramatic? Then just place the mover in the field — a commentator
+  // who goes silent on the opening turn reads as broken.
+  if (!out.length) {
+    const leader = nowOrder[0];
+    const tiedWith = players.find((p) => p !== mover && p.cell === mover.cell);
+    if (tiedWith) out.push(rng.pick(TIED)(name(mover), name(tiedWith)));
+    else if (leader !== mover) out.push(rng.pick(BEHIND)(name(mover), name(leader), leader.cell - mover.cell));
+    else if (nowOrder.length > 1) out.push(rng.pick(LEAD_THIN)(name(mover), mover.cell - nowOrder[1].cell));
+  }
+
+  return out.slice(0, 3);
+}
+
 // ------------------------------------------------------------------ cells ---
 
 export interface CellOutcome {

@@ -7,7 +7,9 @@ export interface BossDef {
   hp: number;
   /** Horizontal speed, px/s. */
   speed: number;
-  /** Seconds between shots in phase 2. */
+  /** Seconds between shots in phase 2. Doubled across the roster on Oleg's
+   *  call: the bosses were laying down more fire than a two-life turn can
+   *  survive, and the fight is meant to be about the shield, not dodging. */
   fireRate: number;
   /** Body size. */
   w: number;
@@ -33,7 +35,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#4de2ff',
     hp: 40,
     speed: 70,
-    fireRate: 1.6,
+    fireRate: 3.2,
     w: 120,
     h: 44,
     taunt: 'Периметр закрыт',
@@ -48,7 +50,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#3ddc84',
     hp: 60,
     speed: 130,
-    fireRate: 1.05,
+    fireRate: 2.1,
     w: 104,
     h: 40,
     taunt: 'Сеть уже сплетена',
@@ -64,7 +66,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#b06bff',
     hp: 95,
     speed: 55,
-    fireRate: 0.85,
+    fireRate: 1.7,
     w: 150,
     h: 52,
     taunt: 'Реактор не остановить',
@@ -79,7 +81,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#ff4d6d',
     hp: 150,
     speed: 105,
-    fireRate: 0.65,
+    fireRate: 1.3,
     w: 168,
     h: 60,
     taunt: 'Ты дошёл слишком далеко',

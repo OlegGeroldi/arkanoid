@@ -35,12 +35,15 @@ import {
   levelForCell,
   makeBoard,
   makePlayer,
+  raceComments,
   resolveCell,
   rollDice,
+  snapshot,
   type CardDef,
   type RaceCell,
   type RacePlayer,
   type Roll,
+  type Standings,
   type TurnResult,
 } from '../core/race';
 
@@ -112,6 +115,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   let moveResolved = false;
   let moveDone = false;
   let trackEl: HTMLElement | null = null;
+  /** Where everyone stood before this turn — the commentator reads the table
+   *  against it, so a swap or a pit is remarked on as readily as a good roll. */
+  let standingsBefore: Standings = new Map();
+  /** The last few lines said, kept for the board screen. */
+  const feed: string[] = [];
 
   music.setScene('menu');
   showBoard();
@@ -219,6 +227,9 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         buildTrack(),
         el('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Клетки закрыты, пока на них никто не встал. Что сработало — светится до конца матча уже для всех.'),
         standings(),
+        feed.length
+          ? el('div', { class: 'commentary', style: 'margin-top:12px' }, ...feed.map((text) => el('p', {}, text)))
+          : null,
         el('h3', { style: 'margin-top:18px' }, 'Запас карт'),
         el('p', { class: 'hint', style: 'margin-top:0' }, 'Карты не появляются сами: их ловят на своём уровне (капсула ★) и получают за зачистку. Что накопили — тем и бросаетесь в чужой ход, каждая на своей клавише.'),
         handsPreview(),
@@ -489,6 +500,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     };
     p.turns++;
     if (cleared) p.cleared++;
+    standingsBefore = snapshot(players);
 
     const earned = giveCards(p, cardsForTurn(result), rng);
     if (earned > 0) note(`+${earned} карт за зачистку`, '#ffd24d');
@@ -621,14 +633,27 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       button('Следующий игрок', nextTurn, 'btn primary'),
       button('В меню', () => app.setScene(mainMenu), 'btn ghost'),
     );
+
+    const said = raceComments(standingsBefore, players, p, distance, rng);
+    for (const line of said) {
+      feed.unshift(line);
+      if (feed.length > 5) feed.pop();
+    }
+
     const line = app.overlay.querySelector('#move-line');
     line?.after(
+      el(
+        'div',
+        { class: 'commentary' },
+        ...said.map((text) => el('p', {}, text)),
+      ),
       el(
         'p',
         { class: 'hint' },
         `${p.name}: клетка ${p.cell} · карт ${p.stock.length}. Впереди ${leader.name} (клетка ${leader.cell}).`,
       ),
     );
+    if (said.length) sfx.play('ui');
   }
 
   function nextTurn(): void {
