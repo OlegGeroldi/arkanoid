@@ -7,6 +7,7 @@ import {
   GRID_TOP,
   PADDLE_H,
   PADDLE_Y,
+  ENERGY_MAX,
   ROWS,
   WALL,
   brickWidthFor,
@@ -28,7 +29,7 @@ import { music } from '../audio/music';
 import { DEBUFF_LIST } from '../core/debuffs';
 import {
   ALLY_CARDS,
-  BOSS_TURN_LIVES,
+  BOSS_LIVES_BONUS,
   BOSS_TURN_SECONDS,
   CARDS,
   CELL_TYPES,
@@ -41,7 +42,7 @@ import {
   STOCK_MAX,
   TEAM_COLORS,
   TEAM_LABELS,
-  TURN_LIVES,
+  MIN_TURN_LIVES,
   TURN_SECONDS,
   cardAllowed,
   cardsForTurn,
@@ -153,7 +154,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   // Per-turn bookkeeping.
   let clock = 0;
   let clockLimit = TURN_SECONDS;
-  let livesAtStart = TURN_LIVES;
+  let livesAtStart = MIN_TURN_LIVES;
   let bestCombo = 0;
   let jamCharges = 0;
   let shieldArmed = false;
@@ -181,6 +182,8 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   let earned: CardId[] = [];
   /** Whether the cell that just fired flipped the turn order. */
   let turnReversed = false;
+  /** Whether it handed the turn back to whoever played before this one. */
+  let turnRewind = false;
   /** The active player's field as last seen by a watcher. */
   let mirror: RaceSnapshot | null = null;
   let mirrorAge = 0;
@@ -226,8 +229,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     return level.boss ? BOSS_TURN_SECONDS : TURN_SECONDS;
   }
 
-  function livesFor(level: LevelData): number {
-    return level.boss ? BOSS_TURN_LIVES : TURN_LIVES;
+  /** What a player sits down with: their stock, never below the floor, plus a
+   *  loan for a boss. */
+  function livesFor(p: RacePlayer, level: LevelData): number {
+    return Math.max(MIN_TURN_LIVES, p.lives) + (level.boss ? BOSS_LIVES_BONUS : 0);
   }
 
   function levelFor(p: RacePlayer): LevelData {
@@ -282,10 +287,17 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   function showBoard(): void {
     phase = 'board';
     const p = active();
+    // Quarantine is served here, at the top of the turn, by whoever owns the
+    // seat — everyone else simply waits for the referee to move on.
+    if (p.skipTurns > 0) {
+      p.skipTurns--;
+      showSkipped(p);
+      return;
+    }
     const level = levelFor(p);
     const finale = isFinale(p);
     const seconds = Math.max(20, clockSecondsFor(level) + p.bonusSeconds);
-    const lives = livesFor(level) + p.bonusLives;
+    const lives = livesFor(p, level);
 
     app.overlay.classList.add('interactive');
     app.overlay.replaceChildren(
@@ -298,16 +310,17 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           { class: 'hint' },
           finale
             ? `Финальная клетка. Победит тот, кто снесёт ${level.name}. Проигрыш откидывает на ${FINALE_KNOCKBACK} клеток назад.`
-            : `Клетка ${p.cell} из ${distance} · уровень «${level.name}» · ${seconds} секунд · ${lives} жизни. Сначала уровень, потом кубик.`,
+            : `Клетка ${p.cell} из ${distance} · уровень «${level.name}» · ${seconds} секунд · жизней ${lives}${level.boss ? ' (одна взаймы на босса)' : ''}. Сначала уровень, потом кубик.`,
         ),
-        p.bonusSeconds !== 0 || p.bonusLives > 0 || p.springDebt
+        p.bonusSeconds !== 0 || p.springDebt || p.chargedSuper || p.skipTurns > 0
           ? el(
               'p',
               { class: 'hint', style: 'color:var(--amber)' },
               [
                 p.bonusSeconds > 0 ? `+${p.bonusSeconds} с с клетки` : '',
                 p.bonusSeconds < 0 ? `${p.bonusSeconds} с с клетки` : '',
-                p.bonusLives > 0 ? `+${p.bonusLives} жизней с клетки` : '',
+                p.chargedSuper ? 'супер заряжен с клетки «Перегрузка»' : '',
+                p.skipTurns > 0 ? `карантин: ходов пропустить ${p.skipTurns}` : '',
                 p.springDebt ? 'долг катапульты: уровень начнётся с помехой' : '',
               ]
                 .filter(Boolean)
@@ -336,6 +349,37 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     );
   }
 
+  /** A turn nobody plays. Shown to the whole table so the pause is explained
+   *  rather than mysterious. */
+  function showSkipped(p: RacePlayer): void {
+    phase = 'board';
+    app.overlay.classList.add('interactive');
+    app.overlay.replaceChildren(
+      el(
+        'div',
+        { class: 'screen narrow' },
+        el('h2', { style: `color:${p.accent}` }, `${p.name}: ход пропущен`),
+        el('p', { class: 'hint' }, 'Карантин: бланк подписан, ход отправлен в архив.'),
+        p.skipTurns > 0 ? el('p', { class: 'hint' }, `Пропустить ещё ходов: ${p.skipTurns}`) : null,
+        el(
+          'div',
+          { class: 'row', style: 'margin-top:18px' },
+          isMine(turnSeat)
+            ? button(
+                'Дальше',
+                () => {
+                  if (online) netio?.endTurn(false);
+                  else nextTurn();
+                },
+                'btn primary',
+              )
+            : el('span', { class: 'hint' }, `Ждём ${p.name}…`),
+          button('В меню', leaveRace, 'btn ghost'),
+        ),
+      ),
+    );
+  }
+
   function standings(): HTMLElement {
     const sorted = [...players].sort((a, b) => b.cell - a.cell);
     return el(
@@ -348,7 +392,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
             class: 'pill',
             style: `border-color:${p.accent};color:${p.accent}${p.seat === turnSeat ? ';font-weight:800' : ''}`,
           },
-          `${p.name} · клетка ${p.cell} · карт ${p.stock.length}${p.team !== null ? ` · союз ${TEAM_LABELS[p.team]}` : ''}`,
+          `${p.name} · клетка ${p.cell} · ♥ ${p.lives} · карт ${p.stock.length}${p.team !== null ? ` · союз ${TEAM_LABELS[p.team]}` : ''}`,
         ),
       ),
     );
@@ -466,14 +510,17 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   /** Lives picked up from cells are not spent until your next turn, so up to
    *  then they are transferable — an ally walking into a boss needs them more
    *  than you do. */
+  /** Lives are now one stock, so what is given away is genuinely your own —
+   *  and you can never give away your last one. */
   function giftRow(): HTMLElement | null {
-    const donors = players.filter((p) => p.bonusLives > 0 && teammates(players, p).length > 0);
+    const donors = players.filter((p) => p.lives > 1 && teammates(players, p).length > 0);
     if (!donors.length) return null;
 
     const give = (from: RacePlayer, to: RacePlayer, n: number): void => {
-      const moved = Math.min(n, from.bonusLives);
-      from.bonusLives -= moved;
-      to.bonusLives += moved;
+      const moved = Math.min(n, from.lives - 1);
+      if (moved <= 0) return;
+      from.lives -= moved;
+      to.lives += moved;
       sfx.play('powerup');
       showBoard();
     };
@@ -481,16 +528,18 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const buttons: HTMLElement[] = [];
     for (const p of donors) {
       for (const mate of teammates(players, p)) {
-        buttons.push(
-          button(`${p.name} → ${mate.name}: 1 жизнь`, () => give(p, mate, 1), 'btn small'),
-          button(`${p.name} → ${mate.name}: все ${p.bonusLives}`, () => give(p, mate, p.bonusLives), 'btn small ghost'),
-        );
+        buttons.push(button(`${p.name} → ${mate.name}: 1 жизнь`, () => give(p, mate, 1), 'btn small'));
+        if (p.lives > 2) {
+          buttons.push(
+            button(`${p.name} → ${mate.name}: ${p.lives - 1}`, () => give(p, mate, p.lives - 1), 'btn small ghost'),
+          );
+        }
       }
     }
     return el(
       'div',
       { style: 'margin-top:10px' },
-      el('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Передать жизни союзнику:'),
+      el('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Отдать союзнику свои жизни (последнюю отдать нельзя):'),
       el('div', { class: 'row', style: 'gap:8px' }, ...buttons),
     );
   }
@@ -502,9 +551,8 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const level = levelFor(p);
     clockLimit = Math.max(20, clockSecondsFor(level) + p.bonusSeconds);
     clock = clockLimit;
-    livesAtStart = livesFor(level) + p.bonusLives;
+    livesAtStart = livesFor(p, level);
     p.bonusSeconds = 0;
-    p.bonusLives = 0;
     bestCombo = 0;
     jamCharges = JAM_PER_TURN;
     shieldArmed = false;
@@ -519,6 +567,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       lives: livesAtStart,
     });
     arena.equipSkills(app.profile.skills);
+    if (p.chargedSuper) {
+      p.chargedSuper = false;
+      arena.energy = ENERGY_MAX;
+      note('Перегрузка: супер заряжен', '#b06bff');
+    }
     fx = new ArenaFx();
 
     // The catapult's price, paid on arrival rather than on take-off.
@@ -712,6 +765,9 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       bricks: arena.bricksBroken,
       boss: arena.level.boss !== undefined && arena.level.boss !== null,
     };
+    // What is left of the stock carries to the next turn. The boss loan is not
+    // yours to keep.
+    p.lives = Math.max(0, arena.lives - (arena.level.boss ? BOSS_LIVES_BONUS : 0));
     app.saveProfile((prof) => (prof.totalXp += Math.round(arena!.xpEarned)));
 
     // Cards are drawn here, on the machine that earned them, and travel as ids
@@ -791,6 +847,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     roll = null;
     moveResolved = false;
     turnReversed = false;
+    turnRewind = false;
     turnSeat = seat;
     turnIndex = index;
     music.setScene('menu');
@@ -845,7 +902,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         'div',
         { class: 'screen' },
         el('h2', { style: `color:${active().accent}`, id: 'move-title' }, headline),
-        el('p', { class: 'hint', id: 'move-line' }, `Клетка ${from} → ${to}`),
+        el('p', { class: 'hint', id: 'move-line' }, `Идём с клетки ${from} на клетку ${to}`),
         buildTrack(),
         el('div', { class: 'row', style: 'margin-top:18px', id: 'move-actions' }),
       ),
@@ -881,12 +938,16 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         direction = direction === 1 ? -1 : 1;
         turnReversed = true;
       }
+      if (outcome.rewind) turnRewind = true;
       refreshCell(before);
       for (const other of players) refreshCell(other.cell);
       const def = CELL_TYPES[cell.kind];
-      sfx.play(outcome.delta < 0 || cell.kind === 'toll' ? 'garbage' : 'powerup');
+      sfx.play(outcome.delta < 0 || cell.kind === 'toll' || cell.kind === 'skip' ? 'garbage' : 'powerup');
       setText('move-title', `${def.icon} ${def.name}`, def.color);
       setText('move-line', `${outcome.text}${wasRevealed ? '' : ' · клетка открыта для всех'}`);
+      const said = app.overlay.querySelector('#move-line');
+      // A <p> cannot hold a <p>; the station's line gets its own block.
+      said?.after(el('div', { class: 'commentary' }, el('p', {}, outcome.line)));
       if (outcome.delta !== 0 || outcome.swappedWith !== null) {
         startMoveContinuation(before, p.cell);
         return;
@@ -926,7 +987,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         button(
           'Передать ход',
           () => {
-            netio?.endTurn(turnReversed);
+            netio?.endTurn(turnReversed, turnRewind);
             actions.replaceChildren(el('span', { class: 'hint' }, 'Передаём ход…'));
           },
           'btn primary',
@@ -970,7 +1031,12 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     arena = null;
     roll = null;
     moveResolved = false;
-    turnSeat = (turnSeat + direction + players.length) % players.length;
+    // A rewind steps back instead of forward: the player before this one goes
+    // again.
+    const step = turnRewind ? -direction : direction;
+    turnRewind = false;
+    turnSeat = (turnSeat + step + players.length) % players.length;
+    turnIndex++;
     if (turnSeat === 0) round++;
     music.setScene('menu');
     showBoard();
@@ -1333,12 +1399,24 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       by += 22 * s;
     }
 
+    // Say the number and where it puts you: "ход на 11" left everyone counting
+    // cells in their head.
+    const target = Math.min(distance, active().cell + roll.total);
     ctx.fillStyle = '#ffffff';
-    ctx.font = `900 ${64 * s}px ${FONT}`;
-    ctx.fillText(`ХОД НА ${roll.total}`, cx, by + 58 * s);
+    ctx.font = `900 ${58 * s}px ${FONT}`;
+    ctx.fillText(`ВЫПАДАЕТ ${roll.total}`, cx, by + 54 * s);
+    ctx.fillStyle = p.accent;
+    ctx.font = `700 ${19 * s}px ${FONT}`;
+    ctx.fillText(
+      target >= distance
+        ? `${p.name} выходит на последнюю клетку ${target} — к мега-боссу`
+        : `${p.name} перемещается на клетку ${target}`,
+      cx,
+      by + 84 * s,
+    );
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = `600 ${14 * s}px ${FONT}`;
-    ctx.fillText(online ? 'Шагаем…' : 'Пробел или клик — шагаем', cx, by + 92 * s);
+    ctx.fillText(online ? 'Шагаем…' : 'Пробел или клик — шагаем', cx, by + 112 * s);
     ctx.restore();
   }
 
@@ -1351,7 +1429,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       return;
     }
     const to = Math.min(distance, p.cell + roll.total);
-    startMove(before, to, `${p.name}: ход на ${roll.total}`);
+    startMove(before, to, `${p.name}: выпадает ${roll.total} — на клетку ${to}`);
   }
 
   return {

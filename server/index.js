@@ -170,10 +170,11 @@ function announceLobby(room) {
 }
 
 /** Hands the turn to the next seat and restarts the clock. */
-function advanceTurn(room, race) {
+function advanceTurn(room, race, step = 1) {
   const n = race.seats.length;
   if (!n) return;
-  race.turn = (race.turn + race.dir + n) % n;
+  // step -1 is the rewind cell: the seat before this one plays again.
+  race.turn = (race.turn + race.dir * step + n) % n;
   race.index += 1;
   race.deadline = Date.now() + RACE_TURN_TIMEOUT_MS;
   broadcast(room, { type: 'race', msg: { k: 'turn', seat: race.turn, index: race.index } });
@@ -264,7 +265,7 @@ function handleRace(ws, msg) {
         race.pending = null;
       }
       if (m.reversed) race.dir = -race.dir;
-      advanceTurn(room, race);
+      advanceTurn(room, race, m.rewind ? -1 : 1);
       break;
     }
 

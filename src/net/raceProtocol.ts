@@ -31,9 +31,10 @@ export type RaceUp =
   | { k: 'start'; distance: number }
   /** The active client, having finished its level. */
   | { k: 'result'; result: TurnResult }
-  /** The active client, having played the roll and the walk. `reversed` is the
-   *  one rule the server tracks, because turn order is its business. */
-  | { k: 'turnEnd'; reversed: boolean }
+  /** The active client, having played the roll and the walk. Turn order is the
+   *  server's business, so these two facts about it travel: `reversed` flips it
+   *  for good, `rewind` hands this one turn back to the previous player. */
+  | { k: 'turnEnd'; reversed: boolean; rewind?: boolean }
   /** A watcher throws a card at the active seat. */
   | { k: 'card'; from: number; card: CardId }
   /** The active client's field, for the watchers. */

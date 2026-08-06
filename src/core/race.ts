@@ -21,8 +21,14 @@ export const MAX_PLAYERS = 6;
  *  only ever runs down; cards are how you buy it back. */
 export const TURN_SECONDS = 75;
 export const BOSS_TURN_SECONDS = 130;
-export const TURN_LIVES = 2;
-export const BOSS_TURN_LIVES = 3;
+/** Lives are a stock, not an allowance: what you finish a turn with is what
+ *  you start the next one with. That makes a medkit worth landing on, a stolen
+ *  life worth resenting, and a life handed to an ally a real sacrifice. */
+export const RACE_START_LIVES = 3;
+/** Nobody is ever eliminated: a turn always opens with at least this many. */
+export const MIN_TURN_LIVES = 1;
+/** A boss turn lends one extra life on top of the stock, and hands it back. */
+export const BOSS_LIVES_BONUS = 1;
 
 /** Cards are earned, never regenerated: you catch them at your own paddle and
  *  spend them on other people's turns. Three of your stock sit on your keys. */
@@ -55,7 +61,11 @@ export type CellKind =
   | 'stash'
   | 'start'
   | 'reverse'
-  | 'toll';
+  | 'toll'
+  | 'skip'
+  | 'rewind'
+  | 'steal'
+  | 'charge';
 
 export interface CellDef {
   kind: CellKind;
@@ -84,7 +94,101 @@ export const CELL_TYPES: Record<CellKind, CellDef> = {
   start: { kind: 'start', name: 'Обрыв', icon: '⏮', color: '#ff2d55', desc: 'В самое начало трассы', weight: 1 },
   reverse: { kind: 'reverse', name: 'Реверс', icon: '🔄', color: '#c46bff', desc: 'Порядок ходов переворачивается до конца матча', weight: 1 },
   toll: { kind: 'toll', name: 'Мытарь', icon: '⌛', color: '#9fb3c8', desc: '−20 секунд на следующем ходу', weight: 2 },
+  skip: { kind: 'skip', name: 'Карантин', icon: '⏸', color: '#ff7a3d', desc: 'Следующий ход вы пропускаете', weight: 2 },
+  rewind: { kind: 'rewind', name: 'Откат смены', icon: '↩', color: '#8ef0ff', desc: 'Ходит снова тот, кто ходил до вас', weight: 2 },
+  steal: { kind: 'steal', name: 'Изъятие', icon: '♡', color: '#ff2d55', desc: 'Забирает жизнь у самого богатого — если у него больше одной', weight: 2 },
+  charge: { kind: 'charge', name: 'Перегрузка', icon: '⚡', color: '#b06bff', desc: 'Следующий уровень начнётся с заряженным супером', weight: 2 },
 };
+
+/** Every cell says something when it fires. The station has been running on
+ *  bad paperwork and worse management for a century, and its signage has the
+ *  tone to match. */
+export const CELL_LINES: Record<CellKind, string[]> = {
+  leap: [
+    'Транспортный контур: «пассажир доставлен досрочно». Жалобы не принимаются.',
+    'Вас протолкнуло вперёд. Табличка внизу: «это была услуга, счёт придёт позже».',
+    'Ускоритель сработал штатно. Впервые за сорок лет.',
+  ],
+  pit: [
+    'Пол оказался предложением, а не обязательством.',
+    'Секция обслуживания приветствует вас. Вы уже были здесь. Вы будете здесь снова.',
+    'Диспетчер: «отставание на несколько клеток укрепляет характер».',
+  ],
+  roulette: [
+    'Генератор случайностей исправен и абсолютно к вам равнодушен.',
+    'Отдел вероятностей рассмотрел вашу заявку. Решение окончательное.',
+    'Монетка встала на ребро, потом передумала.',
+  ],
+  swap: [
+    'Кадровая ротация. Ваши вещи уже там, ваше место уже занято.',
+    'Вас поменяли местами. Заявление об этом писать не нужно, оно уже подано за вас.',
+    'Администрация считает, что вам двоим полезно посмотреть на жизнь друг друга.',
+  ],
+  spring: [
+    'Катапульта отработала. Медицинский отсек предупреждён.',
+    'Отличный полёт! Счёт за перегрузку придёт на следующем уровне.',
+    'Вас выстрелили вперёд. Побочные эффекты: помехи, тошнота, чувство долга.',
+  ],
+  medkit: [
+    'Аптечка. Срок годности истёк, но работает лучше, чем инструкция к ней.',
+    'Одна жизнь зачислена на ваш счёт. Условия обслуживания могут измениться.',
+    'Медотсек: «вы выглядите ужасно. Возьмите ещё одну».',
+  ],
+  hospital: [
+    'Полный курс лечения. Анестезия не входит в тариф.',
+    'Три жизни. Медотсек просит не спрашивать, у кого их взяли.',
+    'Диагноз: живой. Лечение: избыточное.',
+  ],
+  clock: [
+    'Хронометр подкручен в вашу пользу. Отдел учёта времени этого не заметил.',
+    'Тридцать секунд из фонда неиспользованных перерывов.',
+    'Время найдено в диване профсоюза и выдано вам.',
+  ],
+  stash: [
+    'Тайник предыдущего арендатора. Он не вернётся.',
+    'Две карты и записка: «удачи, она вам понадобится».',
+    'Найдено в вентиляции. Не спрашивайте.',
+  ],
+  start: [
+    'Ошибка в документах: ваш пропуск аннулирован. Начните сначала.',
+    'Обрыв. Отдел кадров рад видеть вас снова на входе.',
+    'Система решила, что предыдущие ваши достижения были черновиком.',
+  ],
+  reverse: [
+    'Приказ о порядке очерёдности отменён встречным приказом.',
+    'Реверс. Все идут в другую сторону и делают вид, что так и планировалось.',
+    'Кто-то повернул стрелку. Кто-то всегда поворачивает стрелку.',
+  ],
+  toll: [
+    'Мытарь взял своё. Квитанция — минус двадцать секунд.',
+    'С вас удержано время. Основание: пункт, который вы не читали.',
+    'Пошлина за проход. Наличными не берут, берут секундами.',
+  ],
+  skip: [
+    'Карантин. Вы совершенно здоровы, но бланк уже подписан.',
+    'Ваш следующий ход перенесён в архив. Архив не выдаёт обратно.',
+    'Профилактические работы. Работают все, кроме вас.',
+  ],
+  rewind: [
+    'Смена откачена: ходит снова тот, кто только что закончил. Ему сообщили.',
+    'Табельный аппарат заело. Предыдущий работник возвращается на пост.',
+    'Отдел кадров признал прошлый ход неполным. Повторить.',
+  ],
+  steal: [
+    'Изъятие в пользу нуждающегося. Нуждающийся — вы.',
+    'Одна жизнь переведена со счёта лидера. Он извещён. Он недоволен.',
+    'Перераспределение ресурсов. Всё законно, подпись неразборчива.',
+  ],
+  charge: [
+    'Реактор перегружен, но в хорошем смысле. Супер заряжен полностью.',
+    'Энергощит зарядили из чужого лимита. Кто-то останется без чайника.',
+    'Плазма готова. Инструкция по технике безопасности утеряна.',
+  ],
+};
+
+export function cellLine(kind: CellKind, rng: Rng): string {
+  return rng.pick(CELL_LINES[kind]);
+}
 
 export const CELL_LIST: CellDef[] = Object.values(CELL_TYPES);
 
@@ -155,6 +259,12 @@ export interface RacePlayer {
   cell: number;
   /** Cards earned and not yet thrown. The first HAND_SIZE sit on the keys. */
   stock: CardId[];
+  /** Lives carried from turn to turn. */
+  lives: number;
+  /** Turns to sit out, from the cell that skips you. */
+  skipTurns: number;
+  /** Next level opens with the super already charged. */
+  chargedSuper: boolean;
   /** Union this player belongs to, or null for a lone racer. Two seats sharing
    *  a team are allies; a team may hold three, which is what makes 3-on-3 over
    *  the network a thing rather than two duels. */
@@ -162,7 +272,6 @@ export interface RacePlayer {
   /** Waiting on this player's next roll. */
   diceMod: number;
   /** Waiting on this player's next turn. */
-  bonusLives: number;
   bonusSeconds: number;
   /** Catapult debt: the next level opens with a debuff. */
   springDebt: boolean;
@@ -177,9 +286,11 @@ export function makePlayer(seat: number, name: string, rng: Rng): RacePlayer {
     accent: SEAT_COLORS[seat % SEAT_COLORS.length],
     cell: 0,
     stock: Array.from({ length: START_CARDS }, () => drawCard(rng)),
+    lives: RACE_START_LIVES,
+    skipTurns: 0,
+    chargedSuper: false,
     team: null,
     diceMod: 0,
-    bonusLives: 0,
     bonusSeconds: 0,
     springDebt: false,
     turns: 0,
@@ -563,9 +674,13 @@ export interface CellOutcome {
   /** Cells moved, signed. */
   delta: number;
   swappedWith: number | null;
-  /** True when the turn order flipped. */
+  /** True when the turn order flipped for good. */
   reversed: boolean;
+  /** True when the turn goes back to whoever played before this one. */
+  rewind: boolean;
   text: string;
+  /** The station's own words about what just happened. */
+  line: string;
 }
 
 /** Resolves the cell the player just landed on, mutating positions and the
@@ -578,7 +693,15 @@ export function resolveCell(
   rng: Rng,
 ): CellOutcome {
   const def = CELL_TYPES[kind];
-  const base: CellOutcome = { kind, delta: 0, swappedWith: null, reversed: false, text: def.name };
+  const base: CellOutcome = {
+    kind,
+    delta: 0,
+    swappedWith: null,
+    reversed: false,
+    rewind: false,
+    text: def.name,
+    line: cellLine(kind, rng),
+  };
   const clampCell = (c: number): number => Math.min(distance, Math.max(0, c));
 
   switch (kind) {
@@ -595,11 +718,32 @@ export function resolveCell(
       return { ...base, delta: player.cell - from, swappedWith: best.seat, text: `Обмен местами с ${best.name}` };
     }
     case 'medkit':
-      player.bonusLives += 1;
-      return { ...base, text: 'Аптечка: +1 жизнь на следующий ход' };
+      player.lives += 1;
+      return { ...base, text: `Аптечка: +1 жизнь (теперь ${player.lives})` };
     case 'hospital':
-      player.bonusLives += 3;
-      return { ...base, text: 'Госпиталь: +3 жизни на следующий ход' };
+      player.lives += 3;
+      return { ...base, text: `Госпиталь: +3 жизни (теперь ${player.lives})` };
+    case 'skip':
+      player.skipTurns += 1;
+      return { ...base, text: 'Карантин: следующий ход пропускается' };
+    case 'rewind':
+      return { ...base, rewind: true, text: 'Откат смены: ходит снова предыдущий игрок' };
+    case 'charge':
+      player.chargedSuper = true;
+      return { ...base, text: 'Перегрузка: следующий уровень начнётся с полным супером' };
+    case 'steal': {
+      // From whoever has most to spare; ties go to the lowest seat so that every
+      // client picks the same victim.
+      let victim: RacePlayer | null = null;
+      for (const p of players) {
+        if (p === player || p.lives <= 1) continue;
+        if (!victim || p.lives > victim.lives) victim = p;
+      }
+      if (!victim) return { ...base, text: 'Изъятие: брать не у кого — все и так бедны' };
+      victim.lives -= 1;
+      player.lives += 1;
+      return { ...base, text: `Изъятие: жизнь снята с ${victim.name} (у вас ${player.lives})` };
+    }
     case 'clock':
       player.bonusSeconds += 30;
       return { ...base, text: 'Хронометр: +30 секунд к следующему ходу' };

@@ -96,8 +96,8 @@ export class RaceNet {
     this.send({ k: 'result', result });
   }
 
-  endTurn(reversed: boolean): void {
-    this.send({ k: 'turnEnd', reversed });
+  endTurn(reversed: boolean, rewind = false): void {
+    this.send({ k: 'turnEnd', reversed, rewind });
   }
 
   throwCard(from: number, card: CardId): void {
