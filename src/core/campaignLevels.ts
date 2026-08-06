@@ -1,5 +1,5 @@
 import { BUILTIN_LEVELS } from './builtinLevels';
-import { generateLevel } from './levelGen';
+import { generateLevel, openRegeneratorPockets } from './levelGen';
 import { emptyRows, type LevelData } from './level';
 import { BOSSES, bossForLevel, type BossId } from './bosses';
 import { Rng } from './rng';
@@ -87,7 +87,12 @@ function buildCampaign(): LevelData[] {
       shield[SHIELD_TOP + r] = level.rows[r + 2] ?? level.rows[r] ?? shield[SHIELD_TOP + r];
     }
     const band = BOSSES[boss].nodeShield ? plantNodes(shield, i) : shield;
-    return { ...level, boss, name: BOSSES[boss].name, rows: seedCharges(band, boss, i) };
+    // The band is copied out of another level's rows, so a regenerator can end
+    // up walled in here even though it was reachable where it came from. The
+    // same safety pass has to run again on the result.
+    const grid = seedCharges(band, boss, i).map((row) => [...row]);
+    openRegeneratorPockets(grid, grid.length);
+    return { ...level, boss, name: BOSSES[boss].name, rows: grid.map((row) => row.join('')) };
   });
 }
 

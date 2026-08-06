@@ -3,11 +3,14 @@ import { EMPTY, type BrickCode } from './bricks';
 import { normalizeLevel, type LevelData } from './level';
 import { Rng } from './rng';
 import type { RouteDef } from './routes';
+import { GLYPHS, WORDS, wordGlyph, type Glyph } from './glyphs';
 
 /** Difficulty knobs derived from the campaign position, 0 (easy) to 1 (brutal). */
 interface Recipe {
   /** How much of the grid gets filled. */
   density: number;
+  /** Share of filler bricks swapped for charges. */
+  charge: number;
   /** Rows of bricks to use, from the top. */
   rows: number;
   /** Weighted pool of brick codes for this stage. */
@@ -112,6 +115,57 @@ const scatter: Shaper = (rng, grid, r) => {
   }
 };
 
+/** Stamps a picture into the field and packs bricks around it. A level built
+ *  this way reads as something — a heart, a skull, the word DOH — instead of a
+ *  handful of rows, and the shape carries its own idea: the heart's core
+ *  regenerates around a charge, the bomb's fuse is a line of them. */
+function stampGlyph(grid: string[][], glyph: Glyph, r: Recipe, rng: Rng): boolean[][] {
+  const art = glyph.art;
+  const w = Math.max(...art.map((row) => row.length));
+  const col0 = Math.floor((COLS - w) / 2);
+  const row0 = Math.max(0, Math.floor((r.rows - art.length) / 2));
+  /** The picture and a one-cell halo around it. Filler and stray charges are
+   *  kept out of there — inside a silhouette they turn a skull into gravel —
+   *  but the corners of its box stay free, so the field can still be full. */
+  const kept: boolean[][] = Array.from({ length: ROWS }, () => new Array(COLS).fill(false));
+  const protect = (row: number, col: number): void => {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const rr = row + dr;
+        const cc = col + dc;
+        if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) kept[rr][cc] = true;
+      }
+    }
+  };
+  for (let row = 0; row < art.length; row++) {
+    for (let col = 0; col < art[row].length; col++) {
+      if (art[row][col] !== '.') protect(row0 + row, col0 + col);
+    }
+  }
+
+  // Harder stages build the same picture out of sturdier stock.
+  const body: BrickCode = r.density > 0.72 ? (glyph.skin.body === 'n' ? 't' : 's') : glyph.skin.body;
+
+  for (let row = 0; row < art.length; row++) {
+    for (let col = 0; col < art[row].length; col++) {
+      const ch = art[row][col];
+      if (ch === '.') continue;
+      const code: BrickCode =
+        ch === '@' ? glyph.skin.core : ch === '*' ? glyph.skin.charge : ch === 'x' ? 'x' : body;
+      put(grid, col0 + col, row0 + row, code);
+    }
+  }
+
+  // Something to break outside the picture, thin enough to leave it readable.
+  for (let row = 0; row < r.rows; row++) {
+    for (let col = 0; col < COLS; col++) {
+      if (kept[row][col] || grid[row][col] !== EMPTY) continue;
+      if (rng.next() < r.density * 0.85) put(grid, col, row, rng.pick(r.palette));
+    }
+  }
+  return kept;
+}
+
 const SHAPERS: Shaper[] = [solidBlock, checker, pyramid, columns, rings, diagonals, arena, scatter];
 
 // ------------------------------------------------------------------ recipe --
@@ -137,12 +191,49 @@ function recipeFor(index: number, total: number, route?: RouteDef): Recipe {
   }
 
   return {
-    density: Math.min(0.95, (0.42 + t * 0.5) * (route?.density ?? 1)),
-    rows: Math.min(ROWS - 2, Math.round(4 + t * 11)),
+    // Fuller than it used to be: a level should feel like a wall you are
+    // working through, not a handful of rows.
+    density: Math.min(0.96, (0.58 + t * 0.38) * (route?.density ?? 1)),
+    charge: 0.08 + t * 0.14,
+    rows: Math.min(ROWS - 2, Math.round(7 + t * 9)),
     palette,
     ballSpeed: +((0.95 + t * 0.75) * (route?.ballSpeed ?? 1)).toFixed(2),
     chaos,
   };
+}
+
+/** Turns some of the field into charges and, now and then, wires two of them
+ *  together with a short fuse. One brick going off is a firework; a fuse that
+ *  runs into a cluster is the thing worth aiming at. */
+function wireCharges(rng: Rng, grid: string[][], rows: number, share: number, kept?: boolean[][]): void {
+  const free = (r: number, c: number): boolean => !kept?.[r]?.[c];
+  const spots: [number, number][] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const ch = grid[r][c];
+      if (free(r, c) && ch !== EMPTY && ch !== 'x' && ch !== 'e' && ch !== 'r') spots.push([r, c]);
+    }
+  }
+  for (const [r, c] of spots) {
+    if (rng.next() < share) grid[r][c] = 'e';
+  }
+
+  // A couple of fuses: short runs of charges that carry a blast across the
+  // field instead of letting it die where it started.
+  const fuses = rng.int(1, 4);
+  for (let i = 0; i < fuses; i++) {
+    let r = rng.int(0, rows);
+    let c = rng.int(0, COLS);
+    const len = rng.int(3, 7);
+    const dr = rng.chance(0.5) ? 0 : rng.chance(0.5) ? 1 : -1;
+    const dc = dr === 0 ? (rng.chance(0.5) ? 1 : -1) : rng.chance(0.5) ? 1 : 0;
+    for (let n = 0; n < len; n++) {
+      if (r < 0 || r >= rows || c < 0 || c >= COLS) break;
+      if (free(r, c) && grid[r][c] !== EMPTY && grid[r][c] !== 'x') grid[r][c] = 'e';
+      r += dr;
+      c += dc;
+    }
+  }
 }
 
 /** Reserve a couple of escape lanes so a dense field never becomes a wall the
@@ -168,8 +259,11 @@ function breakSteelRows(grid: string[][], rows: number): void {
 }
 
 /** A regenerator boxed in by indestructible neighbours is a level that never
- *  ends: it revives faster than a ball can reach it. Open one wall. */
-function openRegeneratorPockets(grid: string[][], rows: number): void {
+ *  ends: it revives faster than a ball can reach it. Open one wall.
+ *
+ *  Exported because a boss shield is assembled from copied rows, which can seal
+ *  a pocket that was open in the level it came from. */
+export function openRegeneratorPockets(grid: string[][], rows: number): void {
   const at = (c: number, r: number): string => (c < 0 || c >= COLS || r < 0 || r >= rows ? '.' : grid[r][c]);
 
   for (let r = 0; r < rows; r++) {
@@ -244,27 +338,42 @@ export function generateLevel(index: number, total: number, seed = 0x9e37, route
   const recipe = recipeFor(index, total, route);
   const grid = blank();
 
-  const shaper = recipe.chaos ? rng.pick(SHAPERS) : SHAPERS[index % SHAPERS.length];
-  shaper(rng, grid, recipe);
+  // Two levels in five are a picture. They are the ones people remember, and
+  // they still obey every safety pass below.
+  const picture = index % 5 === 1 || index % 5 === 3;
+  const glyph = picture ? (rng.chance(0.35) ? wordGlyph(rng.pick(WORDS)) : rng.pick(GLYPHS)) : null;
+  const kept = glyph ? stampGlyph(grid, glyph, recipe, rng) : undefined;
+  if (!glyph) (recipe.chaos ? rng.pick(SHAPERS) : SHAPERS[index % SHAPERS.length])(rng, grid, recipe);
 
   if (recipe.chaos) {
     // Chaos levels stack a second pattern on top and skip symmetry entirely.
     rng.pick(SHAPERS)(rng, grid, { ...recipe, density: recipe.density * 0.6 });
   }
 
-  carveLanes(rng, grid, recipe.rows);
+  wireCharges(rng, grid, recipe.rows, recipe.charge, kept);
+  // A picture keeps its shape: carving lanes through a heart would leave a
+  // heart with a hole in it and nothing gained.
+  if (!picture) carveLanes(rng, grid, recipe.rows);
   breakSteelRows(grid, recipe.rows);
+
+  // Symmetry before the last safety pass: carving lanes would otherwise break
+  // the mirror the shapers set up, and a lopsided field reads as sloppy rather
+  // than designed. Chaos levels stay deliberately ragged, and pictures are
+  // drawn symmetrical already — mirroring a word would fold it onto itself.
+  if (!recipe.chaos && !picture) symmetrise(grid, recipe.rows);
+
+  // Truly last, because mirroring can seal a pocket that was open a moment ago,
+  // and one asymmetric cell is a far smaller price than a level that cannot be
+  // finished.
   openRegeneratorPockets(grid, recipe.rows);
 
-  // Symmetry last: carving lanes and opening pockets would otherwise break the
-  // mirror the shapers set up, and a lopsided field reads as sloppy rather than
-  // designed. Chaos levels stay deliberately ragged.
-  if (!recipe.chaos) symmetrise(grid, recipe.rows);
-
   const rows = grid.map((row) => row.join(''));
-  const baseName = recipe.chaos
-    ? `${rng.pick(CHAOS_NAMES)}-${index + 1}`
-    : `${STAGE_NAMES[index % STAGE_NAMES.length]} ${Math.floor(index / STAGE_NAMES.length) + 1}`;
+  // A picture names the level after itself: "Сердце" says more than "Каскад 3".
+  const baseName = glyph
+    ? glyph.name
+    : recipe.chaos
+      ? `${rng.pick(CHAOS_NAMES)}-${index + 1}`
+      : `${STAGE_NAMES[index % STAGE_NAMES.length]} ${Math.floor(index / STAGE_NAMES.length) + 1}`;
   const name = route ? `${route.name}: ${baseName}` : baseName;
 
   const level = normalizeLevel(
