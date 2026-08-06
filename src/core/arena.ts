@@ -75,6 +75,9 @@ export interface Laser {
   x: number;
   y: number;
   vy: number;
+  /** Fired by the plasma barrage rather than by the laser pickup: it punches
+   *  through indestructible bricks instead of dying on them. */
+  plasma?: boolean;
 }
 
 export type ArenaEvent =
@@ -1343,7 +1346,10 @@ export class Arena {
       const brick = this.cellAt(col, row);
       if (brick) {
         this.damageBrick(brick, this.spec ? SPECS[this.spec].laserDamage ?? 1 : 1);
-        this.lasers.splice(i, 1);
+        // Plasma goes through an indestructible block rather than dying on it —
+        // otherwise a single row of them shrugs off the whole super, and the
+        // bricks sheltering behind the wall are the ones you needed to reach.
+        if (!(l.plasma && brick.kind.hp < 0)) this.lasers.splice(i, 1);
       }
     }
   }
@@ -1600,8 +1606,8 @@ export class Arena {
       a.tick = 0.1;
       const half = this.paddleW / 2;
       const x = this.paddleX + this.rng.range(-half, half);
-      this.lasers.push({ x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
-      this.lasers.push({ x: this.width - x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
+      this.lasers.push({ x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3, plasma: true });
+      this.lasers.push({ x: this.width - x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3, plasma: true });
     }
 
     if (a.id === 'singularity' && a.tick <= 0) {
