@@ -125,6 +125,163 @@ function broadcast(room, msg, except) {
   }
 }
 
+// ------------------------------------------------------------------ race ---
+
+/** The race referee, one per room.
+ *
+ *  It deliberately knows nothing about arkanoid. It owns the roster, the seed,
+ *  whose turn it is, the die and the clock — the four things clients must not
+ *  decide for themselves — and lets every rule run on the clients, which agree
+ *  because they share the seed and number their random streams.
+ *
+ *  `reversed` is the single rule fact it accepts from a client, because turn
+ *  order is its business and the reverse cell is what changes it. */
+const races = new Map();
+
+const RACE_TURN_TIMEOUT_MS = 180_000;
+
+function raceOf(room) {
+  let race = races.get(room);
+  if (!race) {
+    race = { started: false, seed: 0, distance: 50, dir: 1, turn: 0, index: 0, seats: [], deadline: 0 };
+    races.set(room, race);
+  }
+  return race;
+}
+
+function raceSeats(race) {
+  return race.seats.map((s, i) => ({ ...s, seat: i }));
+}
+
+function announceLobby(room) {
+  const race = raceOf(room);
+  if (race.started) return;
+  const members = [...(rooms.get(room) ?? [])];
+  broadcast(room, {
+    type: 'race',
+    msg: { k: 'lobby', seats: raceSeats(race), hostId: members[0]?.peerId ?? '', distance: race.distance },
+  });
+}
+
+/** Hands the turn to the next seat and restarts the clock. */
+function advanceTurn(room, race) {
+  const n = race.seats.length;
+  if (!n) return;
+  race.turn = (race.turn + race.dir + n) % n;
+  race.index += 1;
+  race.deadline = Date.now() + RACE_TURN_TIMEOUT_MS;
+  broadcast(room, { type: 'race', msg: { k: 'turn', seat: race.turn, index: race.index } });
+}
+
+/** A client that stops sending anything must not hang the table: its turn is
+ *  burnt and play moves on without it. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [room, race] of races) {
+    if (!race.started || !race.deadline || now < race.deadline) continue;
+    const seat = race.turn;
+    broadcast(room, { type: 'race', msg: { k: 'timeout', seat } });
+    advanceTurn(room, race);
+  }
+}, 1000).unref?.();
+
+function handleRace(ws, msg) {
+  const room = ws.room;
+  if (!room) return;
+  const race = raceOf(room);
+  const m = msg.msg ?? {};
+
+  switch (m.k) {
+    case 'claim': {
+      if (race.started) return;
+      const wanted = Array.isArray(m.seats) ? m.seats.slice(0, 6) : [];
+      race.seats = race.seats.filter((s) => s.owner !== ws.peerId);
+      for (const s of wanted) {
+        if (race.seats.length >= 6) break;
+        race.seats.push({
+          name: String(s?.name ?? 'Игрок').slice(0, 24),
+          team: Number.isInteger(s?.team) ? s.team : null,
+          owner: ws.peerId,
+        });
+      }
+      announceLobby(room);
+      break;
+    }
+
+    case 'leave': {
+      if (race.started) return;
+      race.seats = race.seats.filter((s) => s.owner !== ws.peerId);
+      announceLobby(room);
+      break;
+    }
+
+    case 'start': {
+      if (race.started || race.seats.length < 2) return;
+      // The roster is frozen here, as agreed: latecomers watch.
+      race.started = true;
+      race.seed = (Math.random() * 0xffffffff) >>> 0;
+      race.distance = [20, 50, 100].includes(m.distance) ? m.distance : 50;
+      race.dir = 1;
+      race.turn = 0;
+      race.index = 0;
+      race.deadline = Date.now() + RACE_TURN_TIMEOUT_MS;
+      broadcast(room, {
+        type: 'race',
+        msg: { k: 'started', seed: race.seed, distance: race.distance, seats: raceSeats(race) },
+      });
+      broadcast(room, { type: 'race', msg: { k: 'turn', seat: race.turn, index: race.index } });
+      break;
+    }
+
+    case 'result': {
+      // Only the seat whose turn it is may end a turn, and the die is ours.
+      const seat = race.seats[race.turn];
+      if (!race.started || !seat || seat.owner !== ws.peerId) return;
+      const die = 1 + Math.floor(Math.random() * 6);
+      broadcast(room, {
+        type: 'race',
+        msg: { k: 'roll', seat: race.turn, index: race.index, die, result: m.result ?? null },
+      });
+      break;
+    }
+
+    case 'turnEnd': {
+      const seat = race.seats[race.turn];
+      if (!race.started || !seat || seat.owner !== ws.peerId) return;
+      if (m.reversed) race.dir = -race.dir;
+      advanceTurn(room, race);
+      break;
+    }
+
+    case 'card': {
+      if (!race.started) return;
+      const from = race.seats[m.from];
+      if (!from || from.owner !== ws.peerId) return;
+      broadcast(room, { type: 'race', msg: { k: 'card', from: m.from, card: m.card } });
+      break;
+    }
+
+    case 'snapshot': {
+      const seat = race.seats[race.turn];
+      if (!race.started || !seat || seat.owner !== ws.peerId) return;
+      // A live turn is proof of life, so the clock is pushed back here.
+      race.deadline = Date.now() + RACE_TURN_TIMEOUT_MS;
+      broadcast(room, { type: 'race', msg: { k: 'snapshot', seat: race.turn, snap: m.snap } }, ws);
+      break;
+    }
+
+    case 'over': {
+      if (!race.started) return;
+      broadcast(room, { type: 'race', msg: { k: 'over', seat: race.turn } });
+      races.delete(room);
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
 function peerList(room) {
   return [...(rooms.get(room) ?? [])].map((ws) => ({
     id: ws.peerId,
@@ -192,16 +349,38 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'race': {
+        handleRace(ws, msg);
+        break;
+      }
+
       default:
         break;
     }
   });
 
   ws.on('close', () => {
-    if (ws.room) {
-      rooms.get(ws.room)?.delete(ws);
-      if (rooms.get(ws.room)?.size === 0) rooms.delete(ws.room);
-      else announcePeers(ws.room);
+    if (!ws.room) return;
+    const room = ws.room;
+    rooms.get(room)?.delete(ws);
+
+    const race = races.get(room);
+    if (race && !race.started) {
+      // Lobby: a seat nobody owns is a seat nobody plays.
+      race.seats = race.seats.filter((s) => s.owner !== ws.peerId);
+    } else if (race && race.started && race.seats[race.turn]?.owner === ws.peerId) {
+      // Mid-race the seats stay — the player may come back — but the turn they
+      // were in the middle of does not wait for them.
+      broadcast(room, { type: 'race', msg: { k: 'timeout', seat: race.turn } });
+      advanceTurn(room, race);
+    }
+
+    if (rooms.get(room)?.size === 0) {
+      rooms.delete(room);
+      races.delete(room);
+    } else {
+      announcePeers(room);
+      announceLobby(room);
     }
   });
 });
