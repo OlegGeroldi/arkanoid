@@ -1475,7 +1475,14 @@ export class Arena {
     this.skills = ids
       .filter((id): id is SkillId => id !== null)
       .slice(0, SKILL_SLOTS)
-      .map((id) => ({ id, rank: Math.min(MAX_RANK, Math.max(1, ranks[id] ?? 1)), cd: 0, activeT: 0 }));
+      .map((id) => {
+        const rank = Math.min(MAX_RANK, Math.max(1, ranks[id] ?? 1));
+        // A skill marked for warm-up opens the level charging rather than
+        // loaded: the heavy openers should be earned inside the level. Ranks
+        // shorten the wait along with the cooldown they came from.
+        const cd = SKILLS[id].warmup ? skillCooldown(SKILLS[id], rank) : 0;
+        return { id, rank, cd, activeT: 0 };
+      });
   }
 
   upgradeSkill(id: SkillId): void {

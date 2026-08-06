@@ -31,6 +31,9 @@ export interface SkillDef {
   ranks: [string, string];
   /** Specialisation this skill belongs to; its school offers it more readily. */
   school?: SpecId;
+  /** Starts each level on cooldown instead of ready. The strongest openers
+   *  should be earned inside the level rather than fired in its first second. */
+  warmup?: boolean;
 }
 
 export const SKILLS: Record<SkillId, SkillDef> = {
@@ -43,6 +46,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
     cooldown: 60,
     duration: 5,
     unlockLevel: 1,
+    warmup: true,
     ranks: ['+3 секунды действия', 'притяжение вдвое сильнее'],
     school: 'warden',
   },
@@ -54,6 +58,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
     desc: 'Выстрел, прошивающий колонну кирпичей насквозь',
     cooldown: 60,
     unlockLevel: 1,
+    warmup: true,
     ranks: ['тройной урон и шире след', 'ломает даже неразрушимые блоки'],
     school: 'gunner',
   },
