@@ -358,9 +358,13 @@ export function generateLevel(index: number, total: number, seed = 0x9e37, route
 
   // Symmetry before the last safety pass: carving lanes would otherwise break
   // the mirror the shapers set up, and a lopsided field reads as sloppy rather
-  // than designed. Chaos levels stay deliberately ragged, and pictures are
-  // drawn symmetrical already — mirroring a word would fold it onto itself.
-  if (!recipe.chaos && !picture) symmetrise(grid, recipe.rows);
+  // than designed. Chaos levels stay deliberately ragged.
+  //
+  // Pictograms are drawn as twelve-column palindromes, so mirroring leaves them
+  // untouched and tidies the filler around them into the same symmetry — which
+  // is what makes a picture level look drawn rather than sprinkled. A word is
+  // never a palindrome, so those keep their scatter.
+  if (!recipe.chaos && (!picture || glyph?.mirror)) symmetrise(grid, recipe.rows);
 
   // Truly last, because mirroring can seal a pocket that was open a moment ago,
   // and one asymmetric cell is a far smaller price than a level that cannot be
