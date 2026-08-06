@@ -333,7 +333,10 @@ wss.on('connection', (ws) => {
   ws.playerName = 'Гость';
   ws.room = null;
 
-  send(ws, { type: 'welcome', id: ws.peerId, hall });
+  // The feature list is how a client spots a server older than itself: an
+  // outdated one simply will not mention the race, and the lobby can say so
+  // instead of sitting there with an empty table.
+  send(ws, { type: 'welcome', id: ws.peerId, hall, features: ['race'] });
 
   ws.on('message', (raw) => {
     let msg;
@@ -432,6 +435,16 @@ function localAddresses() {
 }
 
 await loadHall();
+
+server.on('error', (err) => {
+  if (err.code !== 'EADDRINUSE') throw err;
+  console.error(`\n  Порт ${PORT} уже занят — скорее всего, сервер NEONOID уже запущен.`);
+  console.error('  Остановите тот запуск (Ctrl+C в его окне) или закройте процесс:');
+  console.error(`      lsof -ti tcp:${PORT} | xargs kill`);
+  console.error('  Иначе игроки получат новый клиент со старым сервером,');
+  console.error('  и гонка по сети не соберётся: стол будет пустым.\n');
+  process.exit(1);
+});
 
 server.listen(PORT, () => {
   const addresses = localAddresses();

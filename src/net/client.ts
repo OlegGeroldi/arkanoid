@@ -42,6 +42,14 @@ export class NetClient {
   serverHall: HallEntry[] = [];
   /** Set when the page was not served by the room server. */
   unavailable = false;
+  /** What the server admits it can do. An older server simply omits things, so
+   *  a client newer than the server can say that out loud instead of failing
+   *  silently. */
+  features: string[] = [];
+
+  supports(feature: string): boolean {
+    return this.features.includes(feature);
+  }
 
   /** ws:// address derived from where the page came from. */
   get url(): string {
@@ -102,6 +110,7 @@ export class NetClient {
       switch (msg.type) {
         case 'welcome':
           this.selfId = String(msg.id ?? '');
+          this.features = Array.isArray(msg.features) ? (msg.features as string[]) : [];
           if (Array.isArray(msg.hall)) this.serverHall = msg.hall as HallEntry[];
           break;
         case 'joined':

@@ -705,7 +705,11 @@ export function mainMenu(app: App): Scene {
             'div',
             { class: 'row', style: 'margin-top:20px' },
             net.status === 'online'
-              ? button('Гонка по сети', () => screenRaceLobby(names.slice(0, count), teams.slice(0, count), distance), 'btn')
+              ? button(
+                  net.supports('race') ? 'Гонка по сети' : 'Гонка по сети (сервер старый)',
+                  () => screenRaceLobby(names.slice(0, count), teams.slice(0, count), distance),
+                  `btn${net.supports('race') ? '' : ' ghost'}`,
+                )
               : null,
             button(
               'Начать гонку',
@@ -795,6 +799,13 @@ export function mainMenu(app: App): Scene {
           'div',
           { class: 'screen' },
           el('h2', {}, '🎲 Гонка по сети'),
+          net.supports('race')
+            ? null
+            : el(
+                'p',
+                { class: 'hint', style: 'color:var(--pink);font-weight:700' },
+                'Сервер комнат старой версии — он не знает про гонку, поэтому стол останется пустым. Перезапустите его: остановите старый запуск (Ctrl+C или `lsof -ti tcp:8080 | xargs kill`) и снова `npm run lan`.',
+              ),
           el(
             'p',
             { class: 'hint' },
