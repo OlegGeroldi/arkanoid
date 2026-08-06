@@ -304,27 +304,37 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       el(
         'div',
         { class: 'screen' },
-        el('h2', { style: `color:${p.accent}` }, finale ? `${p.name}: МЕГА-БОСС` : `Ход: ${p.name}`),
+        el('h2', { class: 'race-headline', style: `color:${p.accent}` }, finale ? `${p.name}: МЕГА-БОСС` : `Ходит ${p.name}`),
         el(
           'p',
-          { class: 'hint' },
+          { class: 'race-sub' },
           finale
-            ? `Финальная клетка. Победит тот, кто снесёт ${level.name}. Проигрыш откидывает на ${FINALE_KNOCKBACK} клеток назад.`
-            : `Клетка ${p.cell} из ${distance} · уровень «${level.name}» · ${seconds} секунд · жизней ${lives}${level.boss ? ' (одна взаймы на босса)' : ''}. Сначала уровень, потом кубик.`,
+            ? `Последняя клетка: ${level.name}. Снесёте — гонка ваша.`
+            : `Уровень «${level.name}» · сначала уровень, потом кубик`,
         ),
-        p.bonusSeconds !== 0 || p.springDebt || p.chargedSuper || p.skipTurns > 0
+        el(
+          'div',
+          { class: 'race-facts' },
+          fact(`${p.cell}`, `из ${distance} клеток`, p.accent),
+          fact(`♥ ${lives}`, level.boss ? 'жизней (+1 взаймы)' : 'жизней', '#ff5fa2'),
+          fact(`${p.stock.length}`, 'карт в запасе', '#ffd24d'),
+          fact(`${seconds}`, 'секунд на ход', seconds < 75 ? '#ff4d6d' : '#3ddc84'),
+        ),
+        finale
+          ? el('p', { class: 'hint' }, `Не добьёте — откат на ${FINALE_KNOCKBACK} клеток, и гонка продолжится без вас впереди.`)
+          : null,
+        p.bonusSeconds !== 0 || p.springDebt || p.chargedSuper
           ? el(
-              'p',
-              { class: 'hint', style: 'color:var(--amber)' },
-              [
-                p.bonusSeconds > 0 ? `+${p.bonusSeconds} с с клетки` : '',
-                p.bonusSeconds < 0 ? `${p.bonusSeconds} с с клетки` : '',
-                p.chargedSuper ? 'супер заряжен с клетки «Перегрузка»' : '',
-                p.skipTurns > 0 ? `карантин: ходов пропустить ${p.skipTurns}` : '',
-                p.springDebt ? 'долг катапульты: уровень начнётся с помехой' : '',
+              'div',
+              { class: 'row', style: 'gap:8px;margin-top:6px' },
+              ...[
+                p.bonusSeconds > 0 ? `⏱ +${p.bonusSeconds} с с клетки` : '',
+                p.bonusSeconds < 0 ? `⌛ ${p.bonusSeconds} с с клетки` : '',
+                p.chargedSuper ? '⚡ супер заряжен' : '',
+                p.springDebt ? '⇑ долг катапульты: уровень с помехой' : '',
               ]
                 .filter(Boolean)
-                .join(' · '),
+                .map((text) => el('span', { class: 'pill amber' }, text)),
             )
           : null,
         buildTrack(),
@@ -377,6 +387,16 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           button('В меню', leaveRace, 'btn ghost'),
         ),
       ),
+    );
+  }
+
+  /** One big number with a quiet caption under it. */
+  function fact(value: string, caption: string, color?: string): HTMLElement {
+    return el(
+      'div',
+      {},
+      el('b', color ? { style: `color:${color}` } : {}, value),
+      el('span', {}, caption),
     );
   }
 
@@ -901,9 +921,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       el(
         'div',
         { class: 'screen' },
-        el('h2', { style: `color:${active().accent}`, id: 'move-title' }, headline),
-        el('p', { class: 'hint', id: 'move-line' }, `Идём с клетки ${from} на клетку ${to}`),
+        el('h2', { class: 'race-headline', style: `color:${active().accent}`, id: 'move-title' }, headline),
+        el('p', { class: 'race-sub', id: 'move-line' }, `С клетки ${from} на клетку ${to}`),
+        el('div', { id: 'move-effect' }),
         buildTrack(),
+        el('div', { id: 'move-say' }),
         el('div', { class: 'row', style: 'margin-top:18px', id: 'move-actions' }),
       ),
     );
@@ -943,11 +965,21 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       for (const other of players) refreshCell(other.cell);
       const def = CELL_TYPES[cell.kind];
       sfx.play(outcome.delta < 0 || cell.kind === 'toll' || cell.kind === 'skip' ? 'garbage' : 'powerup');
-      setText('move-title', `${def.icon} ${def.name}`, def.color);
-      setText('move-line', `${outcome.text}${wasRevealed ? '' : ' · клетка открыта для всех'}`);
-      const said = app.overlay.querySelector('#move-line');
-      // A <p> cannot hold a <p>; the station's line gets its own block.
-      said?.after(el('div', { class: 'commentary' }, el('p', {}, outcome.line)));
+      const slot = app.overlay.querySelector('#move-effect');
+      slot?.replaceChildren(
+        el(
+          'div',
+          { class: 'race-effect', style: `--cell:${def.color}` },
+          el('div', { class: 'glyph' }, def.icon),
+          el(
+            'div',
+            {},
+            el('h4', {}, `${def.name}${wasRevealed ? '' : ' — клетка открыта'}`),
+            el('div', { class: 'what' }, outcome.text),
+            el('p', { class: 'say' }, outcome.line),
+          ),
+        ),
+      );
       if (outcome.delta !== 0 || outcome.swappedWith !== null) {
         startMoveContinuation(before, p.cell);
         return;
@@ -963,13 +995,6 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     for (let c = from + step; step > 0 ? c <= to : c >= to; c += step) movePath.push(c);
     moveTimer = 0;
     if (!movePath.length) finishMove();
-  }
-
-  function setText(id: string, text: string, color?: string): void {
-    const node = app.overlay.querySelector(`#${id}`) as HTMLElement | null;
-    if (!node) return;
-    node.textContent = text;
-    if (color) node.style.color = color;
   }
 
   function finishMove(): void {
@@ -1006,18 +1031,17 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       if (feed.length > 5) feed.pop();
     }
 
-    const line = app.overlay.querySelector('#move-line');
-    line?.after(
+    const say = app.overlay.querySelector('#move-say');
+    say?.replaceChildren(
       el(
         'div',
-        { class: 'commentary' },
-        ...said.map((text) => el('p', {}, text)),
+        { class: 'race-facts' },
+        fact(`${p.cell}`, `клетка из ${distance}`, p.accent),
+        fact(`♥ ${p.lives}`, 'жизней', '#ff5fa2'),
+        fact(`${p.stock.length}`, 'карт', '#ffd24d'),
+        fact(leader.name, `впереди · клетка ${leader.cell}`, leader.accent),
       ),
-      el(
-        'p',
-        { class: 'hint' },
-        `${p.name}: клетка ${p.cell} · карт ${p.stock.length}. Впереди ${leader.name} (клетка ${leader.cell}).`,
-      ),
+      said.length ? el('div', { class: 'commentary' }, ...said.map((text) => el('p', {}, text))) : el('div', {}),
     );
     if (said.length) sfx.play('ui');
   }

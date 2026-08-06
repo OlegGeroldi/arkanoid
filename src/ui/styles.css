@@ -371,3 +371,52 @@ p.story {
 }
 .commentary p:first-child { color: var(--cyan); }
 .commentary p:last-child { margin-bottom: 0; }
+
+/* --------------------------------------------------- race: between turns -- */
+/* The turn summary used to be four shades of small grey text. What matters is
+   the number, what the cell did, and where you now stand — in that order, and
+   at sizes you can read from across the room. */
+
+.race-headline {
+  margin: 0 0 2px;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+.race-sub {
+  margin: 0 0 14px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Big numbers for the state of a turn: cell, lives, cards, seconds. */
+.race-facts { display: flex; flex-wrap: wrap; gap: 22px; margin: 14px 0 4px; }
+.race-facts > div { min-width: 68px; }
+.race-facts b { display: block; font-size: 24px; font-weight: 800; line-height: 1.1; }
+.race-facts span {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* What the cell did, when one fires — the loudest thing on the screen. */
+.race-effect {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin: 16px 0;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--cell) 45%, transparent);
+  border-left-width: 4px;
+  background: color-mix(in srgb, var(--cell) 12%, transparent);
+  animation: cellreveal 0.45s ease;
+}
+.race-effect .glyph { font-size: 34px; line-height: 1; }
+.race-effect h4 { margin: 0 0 4px; font-size: 18px; color: var(--cell); }
+.race-effect .what { font-size: 15px; font-weight: 700; }
+.race-effect .say { margin: 8px 0 0; font-size: 13px; font-style: italic; color: var(--muted); }
