@@ -184,6 +184,19 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
         ctx.fillRect(x + w - 5 - i * 4, y + h - 4, 2.5, 2.5);
       }
     }
+    if (b.kind.code === 'k') {
+      // An energy node has to be findable at a glance: it is the only thing on
+      // the field that matters while the shield is up.
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.32, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (b.kind.code === 'x') {
       ctx.strokeStyle = 'rgba(255,255,255,0.18)';
       ctx.beginPath();
@@ -422,6 +435,34 @@ function drawBoss(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void 
   ctx.beginPath();
   ctx.arc(boss.x + Math.sin(t * 2) * eyeR * 0.5, eyeY, eyeR * 0.45, 0, Math.PI * 2);
   ctx.fill();
+
+  // While it holds a ball, a claw of light runs from the body to the captured
+  // ball with a countdown ring: the player must be able to see what has it and
+  // for how long, or losing the rally reads as the game breaking.
+  if (boss.grabT > 0) {
+    const held = arena.balls.find((b) => b.captured);
+    if (held) {
+      const left = boss.grabT / 5;
+      ctx.save();
+      ctx.strokeStyle = '#ff2d55';
+      ctx.lineWidth = 2 + Math.sin(t * 18) * 0.8;
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.arc(held.x, held.y, 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+      ctx.stroke();
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(boss.x, boss.y + def.h / 2);
+      ctx.lineTo(held.x, held.y);
+      ctx.stroke();
+      ctx.fillStyle = '#ff2d55';
+      ctx.font = `800 12px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(`${boss.grabT.toFixed(1)}`, held.x, held.y - 24);
+      ctx.restore();
+    }
+  }
 
   if (boss.hitFlash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${boss.hitFlash * 0.5})`;

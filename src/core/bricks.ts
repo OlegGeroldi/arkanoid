@@ -1,6 +1,6 @@
 /** Brick catalogue. The single-character `code` is what levels are stored as,
  *  which keeps level JSON readable and hand-editable. */
-export type BrickCode = 'n' | 't' | 's' | 'x' | 'e' | 'r' | 'g' | 'p' | 'b';
+export type BrickCode = 'n' | 't' | 's' | 'x' | 'e' | 'r' | 'g' | 'p' | 'b' | 'k';
 
 export interface BrickKind {
   code: BrickCode;
@@ -41,9 +41,18 @@ export const BRICK_KINDS: Record<BrickCode, BrickKind> = {
   g: { code: 'g', name: 'Золотой', hp: 1, color: '#ffd24d', xp: 90, dropMul: 1.4, desc: 'Втрое больше опыта' },
   p: { code: 'p', name: 'Подарок', hp: 1, color: '#ff5fa2', xp: 14, dropMul: 0, gift: true, desc: 'Гарантированный бонус' },
   b: { code: 'b', name: 'Мусор', hp: 1, color: '#8892a4', xp: 4, dropMul: 0.2, desc: 'Присылается соперником в PvP' },
+  k: {
+    code: 'k',
+    name: 'Энергоузел',
+    hp: 4,
+    color: '#ff2d55',
+    xp: 70,
+    dropMul: 1.6,
+    desc: 'Держит щит босса: пока цел хоть один узел, корпус неуязвим',
+  },
 };
 
-export const BRICK_ORDER: BrickCode[] = ['n', 't', 's', 'e', 'r', 'g', 'p', 'x'];
+export const BRICK_ORDER: BrickCode[] = ['n', 't', 's', 'e', 'r', 'g', 'p', 'x', 'k'];
 
 export const EMPTY = '.';
 

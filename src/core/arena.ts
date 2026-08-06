@@ -68,6 +68,8 @@ export interface Ball {
   debuffT: number;
   /** Bricks broken since the last charge was fired at the opponent. */
   debuffCharge: number;
+  /** Held by the boss: physics are suspended and it rides the boss's body. */
+  captured: boolean;
   trail: { x: number; y: number }[];
 }
 
@@ -94,6 +96,7 @@ export type ArenaEvent =
   | { t: 'skill'; id: SkillId; rank: number }
   | { t: 'bossHit'; x: number; y: number; color: string }
   | { t: 'bossPhase'; phase: 1 | 2 | 3 }
+  | { t: 'bossGrab'; taken: boolean; x: number; y: number }
   | { t: 'bossShotHit'; x: number; y: number }
   | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
@@ -200,6 +203,9 @@ export interface BossState {
   pushTimer: number;
   hitFlash: number;
   dead: boolean;
+  /** Seconds left of the ball grab, and whether it has been spent. */
+  grabT: number;
+  grabUsed: boolean;
 }
 
 export interface BossShot {
@@ -211,6 +217,17 @@ export interface BossShot {
 /** Damage an explosive brick does to a boss it goes off against. Comparable to
  *  a super hit, so clearing a boss's shield with explosives is a real tactic. */
 const EXPLOSION_BOSS_DAMAGE = 3;
+
+/** The last boss grabs a ball when its health drops to this share, and holds it
+ *  for this long. Once per fight. */
+const BOSS_GRAB_AT = 0.2;
+const BOSS_GRAB_SECONDS = 5;
+
+/** A boss can only be hurt by a blast this often. One charge going off is a
+ *  real hit; a chain reaction of nine is still one hit. Without this, the last
+ *  boss melts the instant its shield drops, and its own dropped walls — which
+ *  are deliberately full of charges — do the melting. */
+const BOSS_BLAST_COOLDOWN = 0.25;
 
 const zeroTimers = (): Timers => ({
   expand: 0,
@@ -322,6 +339,8 @@ export class Arena {
   brittleWear = 0;
   boss: BossState | null = null;
   bossShots: BossShot[] = [];
+  /** Seconds until the boss can be hurt by an explosion again. */
+  private blastCd = 0;
   /** Admin cheat: losing the ball costs nothing and it is served straight back. */
   god = false;
   shake = 0;
@@ -387,6 +406,8 @@ export class Arena {
       maxHp: def.hp,
       phase: 1,
       fireTimer: 2,
+      grabT: 0,
+      grabUsed: false,
       pushTimer: 6,
       hitFlash: 0,
       dead: false,
@@ -398,6 +419,12 @@ export class Arena {
    *  would restore the shield and the fight could never end. */
   get bossShielded(): boolean {
     if (!this.boss || !this.boss.def.shielded) return false;
+    // A node shield hangs on a handful of marked cells, not on the whole field:
+    // you hunt five bricks rather than clear a hundred, and the rows the boss
+    // keeps dropping are cover for them rather than a wall you must mop up.
+    if (this.boss.def.nodeShield) {
+      return this.bricks.some((b) => b.alive && b.kind.code === 'k');
+    }
     // Only the level's own bricks are a shield. Anything pushed in later — the
     // boss's own mixed wall, an opponent's steel row, a race card — must not
     // re-arm it: a boss that pushes every seven seconds would otherwise make
@@ -410,6 +437,7 @@ export class Arena {
     if (!boss || boss.dead) return;
 
     boss.hitFlash = Math.max(0, boss.hitFlash - dt * 3);
+    if (this.blastCd > 0) this.blastCd -= dt;
     const half = boss.def.w / 2;
     boss.x += boss.vx * dt;
     if (boss.x < WALL + half) {
@@ -431,7 +459,7 @@ export class Arena {
       if (phase === 3) boss.vx = boss.vx > 0 ? boss.def.speed * 1.5 : -boss.def.speed * 1.5;
     }
 
-    if (boss.phase >= 2) {
+    if (boss.phase >= 2 && boss.grabT <= 0) {
       boss.fireTimer -= dt;
       if (boss.fireTimer <= 0) {
         boss.fireTimer = boss.def.fireRate * (boss.phase === 3 ? 0.6 : 1);
@@ -453,8 +481,59 @@ export class Arena {
       }
     }
 
+    this.updateBossGrab(dt, ratio);
     this.updateBossShots(dt);
     this.collideBossWithBalls();
+  }
+
+  /** The last boss's one trick: at a fifth of its health it reaches out, takes
+   *  a ball and holds it for five seconds. Once per fight, and while it holds
+   *  on it stops shooting — it has its hands full, and the player needs to be
+   *  able to read what is happening rather than just lose. */
+  private updateBossGrab(dt: number, ratio: number): void {
+    const boss = this.boss;
+    if (!boss || !boss.def.grabsBall) return;
+
+    if (boss.grabT > 0) {
+      boss.grabT -= dt;
+      const held = this.balls.find((b) => b.captured);
+      if (held) {
+        held.x = boss.x;
+        held.y = boss.y + boss.def.h / 2;
+        if (boss.grabT <= 0) {
+          // Spat back out, straight down and fast: the ball comes back as a
+          // problem, not as a gift.
+          held.captured = false;
+          held.vx = this.rng.range(-0.35, 0.35);
+          held.vy = 1;
+          setSpeed(held, held.baseSpeed * 1.35);
+          avoidShallow(held);
+          this.events.push({ t: 'bossGrab', taken: false, x: held.x, y: held.y });
+        }
+      } else {
+        boss.grabT = 0;
+      }
+      return;
+    }
+
+    if (boss.grabUsed || ratio > BOSS_GRAB_AT) return;
+    // Take the ball closest to the boss that is actually in play.
+    let target: Ball | null = null;
+    for (const b of this.balls) {
+      if (b.held !== null || b.captured) continue;
+      if (!target || Math.hypot(b.x - boss.x, b.y - boss.y) < Math.hypot(target.x - boss.x, target.y - boss.y)) {
+        target = b;
+      }
+    }
+    if (!target) return;
+    boss.grabUsed = true;
+    boss.grabT = BOSS_GRAB_SECONDS;
+    target.captured = true;
+    target.vx = 0;
+    target.vy = 0;
+    this.shake = 1;
+    this.flash = 0.6;
+    this.events.push({ t: 'bossGrab', taken: true, x: target.x, y: target.y });
   }
 
   private updateBossShots(dt: number): void {
@@ -484,7 +563,10 @@ export class Arena {
     const half = boss.def.w / 2;
 
     for (const ball of this.balls) {
-      if (ball.held !== null) continue;
+      // A captured ball rides inside the boss's body. Without this it would
+      // register a collision every single frame and chew the boss to death in
+      // a quarter of a second — the grab would be a gift, not a threat.
+      if (ball.held !== null || ball.captured) continue;
       if (ball.x < boss.x - half - ball.r || ball.x > boss.x + half + ball.r) continue;
       if (ball.y + ball.r < boss.y || ball.y - ball.r > boss.y + boss.def.h) continue;
 
@@ -525,6 +607,19 @@ export class Arena {
       boss.hp = 0;
       boss.dead = true;
       this.bossShots = [];
+      // Dying with a ball in its grip must not keep the ball: the boss stops
+      // updating the moment it is dead, and the ball would hang there forever.
+      if (boss.grabT > 0) {
+        boss.grabT = 0;
+        for (const b of this.balls) {
+          if (!b.captured) continue;
+          b.captured = false;
+          b.vx = this.rng.range(-0.5, 0.5);
+          b.vy = -1;
+          setSpeed(b, b.baseSpeed);
+          avoidShallow(b);
+        }
+      }
       this.shake = 1;
       this.flash = 1;
       this.addXp(600);
@@ -734,6 +829,7 @@ export class Arena {
       debuff: null,
       debuffT: 0,
       debuffCharge: 0,
+      captured: false,
       trail: [],
     };
   }
@@ -839,6 +935,8 @@ export class Arena {
 
     for (let i = this.balls.length - 1; i >= 0; i--) {
       const ball = this.balls[i];
+      // A ball in the boss's grip has no physics: it is scenery until released.
+      if (ball.captured) continue;
       if (ball.pierceT > 0) ball.pierceT -= dt;
       if (ball.fireT > 0) ball.fireT -= dt;
       if (ball.typeT > 0) {
@@ -1163,7 +1261,8 @@ export class Arena {
       const ny = Math.max(boss.y, Math.min(cy, boss.y + boss.def.h));
       const dx = cx - nx;
       const dy = cy - ny;
-      if (dx * dx + dy * dy <= radius * radius) {
+      if (dx * dx + dy * dy <= radius * radius && this.blastCd <= 0) {
+        this.blastCd = BOSS_BLAST_COOLDOWN;
         this.damageBoss(EXPLOSION_BOSS_DAMAGE, cx, cy);
       }
     }
@@ -1235,6 +1334,22 @@ export class Arena {
   /** Admin cheat: hand the player a pickup without waiting for a drop. */
   grantPowerup(id: PowerupId): void {
     this.collect(id, this.paddleX, PADDLE_Y - 20);
+  }
+
+  /** Blows every energy node at once — what the ally's gift card does. Nothing
+   *  else in the game can do this, which is the point of the card. */
+  breakShieldNodes(): number {
+    let broken = 0;
+    for (const b of this.bricks) {
+      if (!b.alive || b.kind.code !== 'k') continue;
+      this.destroyBrick(b);
+      broken++;
+    }
+    if (broken) {
+      this.shake = 1;
+      this.flash = 0.7;
+    }
+    return broken;
   }
 
   /** Admin cheat: wipe every breakable brick, ending the level immediately. */

@@ -22,6 +22,12 @@ export interface BossDef {
   pushesFromStart: boolean;
   /** Seconds between row pushes once pushing has begun. */
   pushEvery: number;
+  /** Once, at low health, snatches a ball out of play and holds it. Only the
+   *  last boss does this: it is the fight's one moment of helplessness. */
+  grabsBall?: boolean;
+  /** Its shield hangs on a handful of marked cells rather than on the whole
+   *  field: you hunt five bricks instead of clearing a hundred. */
+  nodeShield?: boolean;
   /** How this one behaves, for the intro line. */
   gimmick: string;
 }
@@ -85,10 +91,12 @@ export const BOSSES: Record<BossId, BossDef> = {
     w: 168,
     h: 60,
     taunt: 'Ты дошёл слишком далеко',
-    shielded: false,
+    shielded: true,
+    nodeShield: true,
     pushesFromStart: true,
     pushEvery: 6,
-    gimmick: 'Ни щита, ни пощады: залпы и ряды без перерыва',
+    grabsBall: true,
+    gimmick: 'Щит на энергоузлах, залпы без перерыва и захват мяча на исходе',
   },
 };
 

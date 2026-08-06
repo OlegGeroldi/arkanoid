@@ -324,7 +324,15 @@ export type CardId =
   | 'blind'
   | 'steel'
   | 'jam'
-  | 'weight';
+  | 'weight'
+  // Gifts: rare, strong, and impossible to use on yourself. A lone racer
+  // holding one is holding a paperweight.
+  | 'giftPlasma'
+  | 'giftLives'
+  | 'giftShield'
+  | 'giftTime'
+  | 'giftPierce'
+  | 'giftBreaker';
 
 /** What a card does. Data, so the scene owns every arena call and this module
  *  stays a pure rulebook. */
@@ -333,7 +341,13 @@ export type CardEffect =
   | { t: 'debuff'; id: DebuffId }
   | { t: 'ball'; id: BallTypeId }
   | { t: 'dice'; delta: number }
-  | { t: 'clock'; delta: number };
+  | { t: 'clock'; delta: number }
+  /** Charges the super and fires it there and then — the timing is the gift. */
+  | { t: 'super' }
+  | { t: 'lives'; delta: number }
+  /** Blows the energy nodes holding the last boss's shield — on an ally's
+   *  field, and only there. */
+  | { t: 'breakShield' };
 
 export interface CardDef {
   id: CardId;
@@ -341,6 +355,8 @@ export interface CardDef {
   icon: string;
   color: string;
   kind: 'buff' | 'debuff';
+  /** Only playable on an ally, never on yourself. */
+  gift?: boolean;
   desc: string;
   /** Relative frequency in the deck. */
   weight: number;
@@ -367,6 +383,15 @@ export const CARDS: Record<CardId, CardDef> = {
   steel: { id: 'steel', name: 'Стальной ряд', icon: '▦', color: '#9fb3c8', kind: 'debuff', weight: 3, desc: 'Сверху падает ряд стали', effect: { t: 'debuff', id: 'steel' } },
   jam: { id: 'jam', name: 'Глушилка', icon: '⌁', color: '#ffd24d', kind: 'debuff', weight: 3, desc: 'Скиллы уходят на перезарядку', effect: { t: 'debuff', id: 'jam' } },
   weight: { id: 'weight', name: 'Гиря', icon: '⚓', color: '#9fb3c8', kind: 'debuff', weight: 3, desc: '−1 к его броску кубика', effect: { t: 'dice', delta: -1 } },
+
+  // Gifts. Rare, and they only ever leave your hand towards an ally, which is
+  // the whole point: a union gets a toolkit, not just a non-aggression pact.
+  giftPlasma: { id: 'giftPlasma', name: 'Залп в подарок', icon: '⁂', color: '#ff7a3d', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: супер заряжается и бьёт немедленно', effect: { t: 'super' } },
+  giftLives: { id: 'giftLives', name: 'Второе дыхание', icon: '✚', color: '#ff8fc4', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: +2 жизни', effect: { t: 'lives', delta: 2 } },
+  giftShield: { id: 'giftShield', name: 'Ангел-хранитель', icon: '▭', color: '#4de2ff', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: барьер внизу поймает мяч', effect: { t: 'powerup', id: 'shield' } },
+  giftTime: { id: 'giftTime', name: 'Перекур', icon: '⏳', color: '#3ddc84', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: +25 секунд', effect: { t: 'clock', delta: 25 } },
+  giftPierce: { id: 'giftPierce', name: 'Пробой', icon: '✹', color: '#ffd24d', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: мяч прошивает кирпичи', effect: { t: 'powerup', id: 'pierce' } },
+  giftBreaker: { id: 'giftBreaker', name: 'Сброс щита', icon: '⊘', color: '#ff2d55', kind: 'buff', gift: true, weight: 2, desc: 'Союзнику: сносит энергоузлы мега-босса — и, возможно, отдаёт ему победу', effect: { t: 'breakShield' } },
 };
 
 export const CARD_LIST: CardDef[] = Object.values(CARDS);
@@ -388,6 +413,9 @@ export function teammates(players: RacePlayer[], p: RacePlayer): RacePlayer[] {
 }
 
 export function cardAllowed(def: CardDef, from: RacePlayer, to: RacePlayer): boolean {
+  // A gift needs somebody to give it to; a debuff needs somebody who is not a
+  // friend. Both rules are about the same union.
+  if (def.gift) return allied(from, to);
   return !(allied(from, to) && def.kind === 'debuff');
 }
 

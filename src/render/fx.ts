@@ -80,6 +80,10 @@ export class ArenaFx {
           this.text(240, 250, e.phase === 3 ? 'БОСС В ЯРОСТИ' : 'ЩИТ ПРОБИТ', '#ff4d6d');
           this.ring(240, 120, 300, '#ff4d6d');
           break;
+        case 'bossGrab':
+          this.text(240, 300, e.taken ? 'МЯЧ ЗАХВАЧЕН' : 'МЯЧ ОТПУЩЕН', e.taken ? '#ff2d55' : '#ffd24d');
+          this.ring(e.x, e.y, e.taken ? 160 : 120, e.taken ? '#ff2d55' : '#ffd24d');
+          break;
         case 'bossShotHit':
           this.burst(e.x, e.y, '#ff4d6d', 16, 200);
           this.text(240, 560, 'РАКЕТКА ПОВРЕЖДЕНА', '#ff4d6d');

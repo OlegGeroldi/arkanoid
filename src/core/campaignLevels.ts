@@ -19,6 +19,35 @@ const CHARGE_SHARE: Record<BossId, number> = {
   doh: 0.34,
 };
 
+/** How many energy nodes hold the last boss's shield up. Few enough to hunt,
+ *  many enough that the hunt is the fight. */
+const SHIELD_NODES = 5;
+
+/** Marks a handful of cells in the band as the nodes that hold the shield.
+ *  They are spread across the width so the hunt covers the whole field. */
+function plantNodes(rows: string[], index: number): string[] {
+  const grid = rows.map((r) => [...r]);
+  const spots: [number, number][] = [];
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (grid[r][c] !== '.' && grid[r][c] !== 'x') spots.push([r, c]);
+    }
+  }
+  if (!spots.length) return rows;
+
+  const rng = new Rng((0x4e0de ^ (index * 7919)) >>> 0);
+  const wanted = Math.min(SHIELD_NODES, spots.length);
+  const picked: [number, number][] = [];
+  for (let n = 0; n < wanted; n++) {
+    // Spread across the width: each node comes from its own vertical band.
+    const lo = Math.floor((n / wanted) * spots.length);
+    const hi = Math.max(lo + 1, Math.floor(((n + 1) / wanted) * spots.length));
+    picked.push(spots[lo + rng.int(0, hi - lo)]);
+  }
+  for (const [r, c] of picked) grid[r][c] = 'k';
+  return grid.map((r) => r.join(''));
+}
+
 /** Scatters explosives through a boss's shield band. Seeded by level index, so
  *  the same fight always looks the same. */
 function seedCharges(rows: string[], boss: BossId, index: number): string[] {
@@ -26,7 +55,7 @@ function seedCharges(rows: string[], boss: BossId, index: number): string[] {
   const share = CHARGE_SHARE[boss];
   return rows.map((row) =>
     [...row]
-      .map((ch) => (ch !== '.' && ch !== 'x' && ch !== 'e' && rng.chance(share) ? 'e' : ch))
+      .map((ch) => (ch !== '.' && ch !== 'x' && ch !== 'e' && ch !== 'k' && rng.chance(share) ? 'e' : ch))
       .join(''),
   );
 }
@@ -57,7 +86,8 @@ function buildCampaign(): LevelData[] {
     for (let r = 0; r < SHIELD_ROWS; r++) {
       shield[SHIELD_TOP + r] = level.rows[r + 2] ?? level.rows[r] ?? shield[SHIELD_TOP + r];
     }
-    return { ...level, boss, name: BOSSES[boss].name, rows: seedCharges(shield, boss, i) };
+    const band = BOSSES[boss].nodeShield ? plantNodes(shield, i) : shield;
+    return { ...level, boss, name: BOSSES[boss].name, rows: seedCharges(band, boss, i) };
   });
 }
 

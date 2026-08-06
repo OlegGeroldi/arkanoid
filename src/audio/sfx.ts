@@ -250,6 +250,9 @@ export class Sfx {
         case 'bossPhase':
           this.play('garbage');
           break;
+        case 'bossGrab':
+          this.play(e.taken ? 'super' : 'explosion');
+          break;
         case 'bossShotHit':
           this.play('lifeLost');
           break;

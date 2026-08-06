@@ -434,10 +434,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
               if (!id) return el('div', { class: 'desc' }, `[${SEAT_KEY_LABELS[p.seat][i]}] — пусто`);
               const def = CARDS[id];
               const banned = !cardAllowed(def, p, active());
+              const why = !banned ? '' : def.gift ? ' — только союзнику' : ' — союзник';
               return el(
                 'div',
                 { class: 'desc', style: banned ? 'opacity:.4' : '' },
-                `[${SEAT_KEY_LABELS[p.seat][i]}] ${def.icon} ${def.name}${banned ? ' — союзник' : ''}`,
+                `[${SEAT_KEY_LABELS[p.seat][i]}] ${def.icon} ${def.name}${why}`,
               );
             }),
           ),
@@ -678,7 +679,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const target = active();
 
     if (!cardAllowed(def, from, target)) {
-      note(`${from.name}: союзника не бьём`, '#5a6472');
+      note(def.gift ? `${def.name} — только союзнику` : `${from.name}: союзника не бьём`, '#5a6472');
       return;
     }
 
@@ -747,6 +748,24 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         if (arena) {
           clock = Math.max(1, clock + def.effect.delta);
           clockLimit = Math.max(clockLimit, clock);
+        }
+        break;
+      case 'super':
+        // Charged and let off at once: a gift is worth what the moment is.
+        if (arena) {
+          arena.energy = ENERGY_MAX;
+          arena.fireSuper();
+        }
+        break;
+      case 'lives':
+        // Lives are the shared stock, so this one lands on every client.
+        target.lives += def.effect.delta;
+        if (arena) arena.lives += def.effect.delta;
+        break;
+      case 'breakShield':
+        if (arena) {
+          const broken = arena.breakShieldNodes();
+          fx.text(ARENA_W / 2, 180, broken ? 'ЩИТ СБРОШЕН' : 'УЗЛОВ НЕТ', '#ff2d55');
         }
         break;
     }
@@ -1210,7 +1229,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         if (banned) {
           ctx.textAlign = 'right';
           ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.fillText('союзник', w - pad, ty);
+          ctx.fillText(def.gift ? 'только своим' : 'союзник', w - pad, ty);
           ctx.textAlign = 'left';
         }
         ctx.globalAlpha = 1;
