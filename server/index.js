@@ -115,6 +115,27 @@ const wss = new WebSocketServer({ server });
 /** roomName -> Set<ws> */
 const rooms = new Map();
 
+/** A busy port must read as an instruction, not as a stack trace.
+ *
+ *  Both the http server and the WebSocketServer have to be covered: `ws`
+ *  forwards the http error to itself, and it registers that listener when it is
+ *  constructed — so a handler added later, on the http server alone, never gets
+ *  the chance to run. */
+function onListenError(err) {
+  if (err.code !== 'EADDRINUSE') throw err;
+  console.error(`\n  Порт ${PORT} уже занят — сервер NEONOID где-то уже запущен.`);
+  console.error('  Остановите тот запуск (Ctrl+C в его окне) или закройте процесс:\n');
+  console.error(`      lsof -ti tcp:${PORT} | xargs kill\n`);
+  console.error('  Можно и просто занять другой порт:\n');
+  console.error(`      PORT=8081 npm run lan\n`);
+  console.error('  Оставлять как есть нельзя: игроки получат новый клиент со старым');
+  console.error('  сервером, и гонка по сети не соберётся — стол будет пустым.\n');
+  process.exit(1);
+}
+
+server.on('error', onListenError);
+wss.on('error', onListenError);
+
 const send = (ws, msg) => {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 };
@@ -436,16 +457,6 @@ function localAddresses() {
 }
 
 await loadHall();
-
-server.on('error', (err) => {
-  if (err.code !== 'EADDRINUSE') throw err;
-  console.error(`\n  Порт ${PORT} уже занят — скорее всего, сервер NEONOID уже запущен.`);
-  console.error('  Остановите тот запуск (Ctrl+C в его окне) или закройте процесс:');
-  console.error(`      lsof -ti tcp:${PORT} | xargs kill`);
-  console.error('  Иначе игроки получат новый клиент со старым сервером,');
-  console.error('  и гонка по сети не соберётся: стол будет пустым.\n');
-  process.exit(1);
-});
 
 server.listen(PORT, () => {
   const addresses = localAddresses();
