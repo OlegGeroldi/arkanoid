@@ -27,10 +27,13 @@ import {
   SEAT_KEYS,
   SEAT_KEY_LABELS,
   STOCK_MAX,
+  TEAM_COLORS,
+  TEAM_LABELS,
   TURN_LIVES,
   TURN_SECONDS,
   cardAllowed,
   cardsForTurn,
+  freeTeam,
   giveCards,
   levelForCell,
   makeBoard,
@@ -39,6 +42,7 @@ import {
   resolveCell,
   rollDice,
   snapshot,
+  teammates,
   type CardDef,
   type RaceCell,
   type RacePlayer,
@@ -61,6 +65,8 @@ const STEP_TIME = 0.11;
 
 export interface RaceOptions {
   names: string[];
+  /** Union per seat, agreed before the match; null is a lone racer. */
+  teams?: (number | null)[];
   distance: number;
   levels: LevelData[];
   superId: SuperId;
@@ -81,7 +87,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   const rng = new Rng(Date.now() >>> 0);
   const distance = opts.distance;
   const cells = makeBoard(distance, rng);
-  const players = opts.names.map((n, i) => makePlayer(i, n, rng));
+  const players = opts.names.map((n, i) => {
+    const p = makePlayer(i, n, rng);
+    p.team = opts.teams?.[i] ?? null;
+    return p;
+  });
   const backdrop = new Backdrop();
   const stepper = new FixedStepper();
   const speed = opts.speed ?? 1;
@@ -256,7 +266,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
             class: 'pill',
             style: `border-color:${p.accent};color:${p.accent}${p.seat === turnSeat ? ';font-weight:800' : ''}`,
           },
-          `${p.name} · клетка ${p.cell} · карт ${p.stock.length}${p.pact !== null ? ` · пакт с ${players[p.pact].name}` : ''}`,
+          `${p.name} · клетка ${p.cell} · карт ${p.stock.length}${p.team !== null ? ` · союз ${TEAM_LABELS[p.team]}` : ''}`,
         ),
       ),
     );
@@ -289,39 +299,61 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     );
   }
 
-  /** Pacts are agreed out loud; this only records them. Mutual by construction,
-   *  and breaking one is public. */
+  /** Unions are usually agreed before the match on the setup screen; this panel
+   *  is what is left of that mid-race — a lone racer can still join somebody,
+   *  and anybody can walk out. */
   function pactRow(): HTMLElement {
-    const free = players.filter((p) => p.pact === null);
     const rows: HTMLElement[] = [];
+    const loners = players.filter((p) => p.team === null);
+
     for (const p of players) {
-      if (p.pact !== null) {
-        // A pact is one deal, not two: only the lower seat renders the button.
-        if (p.pact < p.seat) continue;
+      if (p.team === null) continue;
+      // One row per union, rendered by its lowest seat.
+      const mates = teammates(players, p);
+      if (mates.some((m) => m.seat < p.seat)) continue;
+      rows.push(
+        el(
+          'span',
+          { class: 'pill', style: `border-color:${TEAM_COLORS[p.team]};color:${TEAM_COLORS[p.team]}` },
+          `Союз ${TEAM_LABELS[p.team]}: ${[p, ...mates].map((m) => m.name).join(' + ')}`,
+        ),
+      );
+    }
+
+    for (const p of players) {
+      if (p.team === null) continue;
+      rows.push(
+        button(
+          `${p.name} — выйти из союза`,
+          () => {
+            p.stock.splice(0, Math.ceil(p.stock.length / 2));
+            leaveTeam(p);
+            sfx.play('ui');
+            showBoard();
+          },
+          'btn small ghost',
+        ),
+      );
+    }
+
+    // Joining: a loner may attach to an existing union or start one with another
+    // loner. Three to a team, no more.
+    for (const p of loners) {
+      for (const q of players) {
+        if (q === p) continue;
+        if (q.team === null && q.seat < p.seat) continue;
+        const size = q.team === null ? 1 : 1 + teammates(players, q).length;
+        if (q.team !== null && size >= 3) continue;
         rows.push(
           button(
-            `Разорвать пакт ${p.name} — ${players[p.pact].name}`,
+            q.team === null ? `Союз: ${p.name} + ${q.name}` : `${p.name} → союз ${TEAM_LABELS[q.team]}`,
             () => {
-              const ally = players[p.pact!];
-              p.stock.splice(0, Math.ceil(p.stock.length / 2));
-              ally.pact = null;
-              p.pact = null;
-              sfx.play('ui');
-              showBoard();
-            },
-            'btn small ghost',
-          ),
-        );
-        continue;
-      }
-      for (const q of free) {
-        if (q.seat <= p.seat) continue;
-        rows.push(
-          button(
-            `Пакт: ${p.name} + ${q.name}`,
-            () => {
-              p.pact = q.seat;
-              q.pact = p.seat;
+              if (q.team === null) {
+                const t = freeTeam(players);
+                if (t === null) return;
+                q.team = t;
+              }
+              p.team = q.team;
               sfx.play('ui');
               showBoard();
             },
@@ -330,39 +362,48 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         );
       }
     }
+
     return el(
       'div',
       { style: 'margin-top:16px' },
-      el('h3', {}, 'Альянсы'),
-      el('p', { class: 'hint', style: 'margin-top:0' }, `Пока пакт держится, союзники не могут бить друг друга, а за каждый зачищенный союзником уровень вы получаете карту. Жизни, собранные с клеток, можно отдать союзнику. Разрыв стоит половины запаса и виден всем.`),
-      el('div', { class: 'row', style: 'gap:8px' }, ...(rows.length ? rows : [el('span', { class: 'hint' }, 'Все связаны пактами')])),
+      el('h3', {}, 'Союзы'),
+      el('p', { class: 'hint', style: 'margin-top:0' }, 'Союзники не могут бить друг друга, за каждый зачищенный ими уровень вы получаете карту, а собранные с клеток жизни можно передать. Втроём — предел. Выход стоит половины запаса карт и виден всем.'),
+      el('div', { class: 'row', style: 'gap:8px' }, ...(rows.length ? rows : [el('span', { class: 'hint' }, 'Все сами за себя')])),
       giftRow(),
     );
+  }
+
+  /** Leaving empties a team of one, which would otherwise linger and block a
+   *  team letter for the rest of the match. */
+  function leaveTeam(p: RacePlayer): void {
+    const mates = teammates(players, p);
+    p.team = null;
+    if (mates.length === 1) mates[0].team = null;
   }
 
   /** Lives picked up from cells are not spent until your next turn, so up to
    *  then they are transferable — an ally walking into a boss needs them more
    *  than you do. */
   function giftRow(): HTMLElement | null {
-    const donors = players.filter((p) => p.pact !== null && p.bonusLives > 0);
+    const donors = players.filter((p) => p.bonusLives > 0 && teammates(players, p).length > 0);
     if (!donors.length) return null;
 
-    const give = (from: RacePlayer, n: number): void => {
-      const ally = players[from.pact!];
+    const give = (from: RacePlayer, to: RacePlayer, n: number): void => {
       const moved = Math.min(n, from.bonusLives);
       from.bonusLives -= moved;
-      ally.bonusLives += moved;
+      to.bonusLives += moved;
       sfx.play('powerup');
       showBoard();
     };
 
     const buttons: HTMLElement[] = [];
     for (const p of donors) {
-      const ally = players[p.pact!];
-      buttons.push(
-        button(`${p.name} → ${ally.name}: 1 жизнь`, () => give(p, 1), 'btn small'),
-        button(`${p.name} → ${ally.name}: все ${p.bonusLives}`, () => give(p, p.bonusLives), 'btn small ghost'),
-      );
+      for (const mate of teammates(players, p)) {
+        buttons.push(
+          button(`${p.name} → ${mate.name}: 1 жизнь`, () => give(p, mate, 1), 'btn small'),
+          button(`${p.name} → ${mate.name}: все ${p.bonusLives}`, () => give(p, mate, p.bonusLives), 'btn small ghost'),
+        );
+      }
     }
     return el(
       'div',
@@ -504,7 +545,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
 
     const earned = giveCards(p, cardsForTurn(result), rng);
     if (earned > 0) note(`+${earned} карт за зачистку`, '#ffd24d');
-    if (cleared && p.pact !== null) giveCards(players[p.pact], ALLY_CARDS, rng);
+    if (cleared) for (const mate of teammates(players, p)) giveCards(mate, ALLY_CARDS, rng);
     app.saveProfile((prof) => (prof.totalXp += Math.round(arena!.xpEarned)));
 
     if (isFinale(p)) return finishFinale(p, result);
@@ -668,13 +709,25 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
 
   function showOver(winner: RacePlayer): void {
     const table = [...players].sort((a, b) => b.cell - a.cell);
+    // A union wins together: whoever of them lands the kill, the team takes it.
+    const mates = teammates(players, winner);
+    const title =
+      winner.team !== null
+        ? `ПОБЕДА СОЮЗА ${TEAM_LABELS[winner.team]}: ${[winner, ...mates].map((m) => m.name).join(' + ')}`
+        : `ПОБЕДА: ${winner.name}`;
     app.overlay.classList.add('interactive');
     app.overlay.replaceChildren(
       el(
         'div',
         { class: 'screen narrow' },
-        el('h2', { style: `color:${winner.accent}` }, `ПОБЕДА: ${winner.name}`),
-        el('p', { class: 'hint' }, `Мега-босс повержен на ${round}-м круге.`),
+        el('h2', { style: `color:${winner.team !== null ? TEAM_COLORS[winner.team] : winner.accent}` }, title),
+        el(
+          'p',
+          { class: 'hint' },
+          winner.team !== null
+            ? `${winner.name} снял мега-босса на ${round}-м круге — победа засчитана всему союзу.`
+            : `Мега-босс повержен на ${round}-м круге.`,
+        ),
         ...table.map((p) =>
           el('p', { class: 'hint' }, `${p.name}: клетка ${p.cell} · ходов ${p.turns} · зачищено ${p.cleared}`),
         ),

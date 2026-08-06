@@ -31,8 +31,13 @@ export const START_CARDS = 3;
 export const STOCK_MAX = 12;
 export const CLEAR_CARDS = 2;
 export const BOSS_CLEAR_CARDS = 3;
-/** An ally's clear pays you one card too — the only standing perk of a pact. */
+/** An ally's clear pays every teammate a card — the standing perk of a union. */
 export const ALLY_CARDS = 1;
+
+/** Letters shown for teams. Six seats can split at most three ways and still
+ *  be a race rather than a duel of blocks. */
+export const TEAM_LABELS = ['A', 'B', 'C'];
+export const TEAM_COLORS = ['#4de2ff', '#ff5fa2', '#3ddc84'];
 
 export const FINALE_KNOCKBACK = 5;
 
@@ -150,8 +155,10 @@ export interface RacePlayer {
   cell: number;
   /** Cards earned and not yet thrown. The first HAND_SIZE sit on the keys. */
   stock: CardId[];
-  /** Seat of the ally, or null. A pact is always mutual. */
-  pact: number | null;
+  /** Union this player belongs to, or null for a lone racer. Two seats sharing
+   *  a team are allies; a team may hold three, which is what makes 3-on-3 over
+   *  the network a thing rather than two duels. */
+  team: number | null;
   /** Waiting on this player's next roll. */
   diceMod: number;
   /** Waiting on this player's next turn. */
@@ -170,7 +177,7 @@ export function makePlayer(seat: number, name: string, rng: Rng): RacePlayer {
     accent: SEAT_COLORS[seat % SEAT_COLORS.length],
     cell: 0,
     stock: Array.from({ length: START_CARDS }, () => drawCard(rng)),
-    pact: null,
+    team: null,
     diceMod: 0,
     bonusLives: 0,
     bonusSeconds: 0,
@@ -259,10 +266,26 @@ export function drawCard(rng: Rng): CardId {
   return rng.pick(CARD_POOL);
 }
 
-/** A pact bans hitting your ally outright: buffs only, or the pact means
- *  nothing. There is no price on a card beyond having earned it. */
+/** Teammates cannot hit each other: buffs only, or a union means nothing. There
+ *  is no price on a card beyond having earned it. */
+export function allied(a: RacePlayer, b: RacePlayer): boolean {
+  return a !== b && a.team !== null && a.team === b.team;
+}
+
+export function teammates(players: RacePlayer[], p: RacePlayer): RacePlayer[] {
+  return players.filter((q) => allied(p, q));
+}
+
 export function cardAllowed(def: CardDef, from: RacePlayer, to: RacePlayer): boolean {
-  return !(from.pact === to.seat && def.kind === 'debuff');
+  return !(allied(from, to) && def.kind === 'debuff');
+}
+
+/** The smallest free team number, or null when all three are taken. */
+export function freeTeam(players: RacePlayer[]): number | null {
+  for (let i = 0; i < TEAM_LABELS.length; i++) {
+    if (!players.some((p) => p.team === i)) return i;
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------- dice ---

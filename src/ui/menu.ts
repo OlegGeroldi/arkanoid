@@ -33,7 +33,7 @@ import { ALL_ENTRIES, type StoryEntry } from '../core/story';
 import { net } from '../net/client';
 import { netVersusScene } from '../game/netVersus';
 import { raceScene } from '../game/race';
-import { RACE_DISTANCES, SEAT_KEY_LABELS } from '../core/race';
+import { RACE_DISTANCES, SEAT_KEY_LABELS, TEAM_COLORS, TEAM_LABELS } from '../core/race';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -551,6 +551,9 @@ export function mainMenu(app: App): Scene {
     const names: string[] = ['Игрок 1', 'Игрок 2', 'Игрок 3', 'Игрок 4', 'Игрок 5', 'Игрок 6'];
     names[0] = app.profile.name;
     let distance: number = RACE_DISTANCES[0];
+    /** Union per seat, null for a lone racer. Agreed before the match, because
+     *  over the network there is no table to lean across afterwards. */
+    const teams: (number | null)[] = [null, null, null, null, null, null];
 
     const render = (): void => {
       show(
@@ -590,19 +593,72 @@ export function mainMenu(app: App): Scene {
             { class: 'grid c3', style: 'margin-top:10px' },
             ...names.slice(0, count).map((n, i) =>
               el(
-                'label',
-                { class: 'field' },
-                `Место ${i + 1} · клавиши ${SEAT_KEY_LABELS[i].join(' ')}`,
-                el('input', {
-                  type: 'text',
-                  value: n,
-                  oninput: (e: Event) => {
-                    names[i] = (e.target as HTMLInputElement).value || `Игрок ${i + 1}`;
-                  },
-                }),
+                'div',
+                {},
+                el(
+                  'label',
+                  { class: 'field' },
+                  `Место ${i + 1} · клавиши ${SEAT_KEY_LABELS[i].join(' ')}`,
+                  el('input', {
+                    type: 'text',
+                    value: n,
+                    oninput: (e: Event) => {
+                      names[i] = (e.target as HTMLInputElement).value || `Игрок ${i + 1}`;
+                    },
+                  }),
+                ),
+                el(
+                  'div',
+                  { class: 'row', style: 'gap:4px;margin-top:6px' },
+                  button(
+                    'сам за себя',
+                    () => {
+                      teams[i] = null;
+                      sfx.play('ui');
+                      render();
+                    },
+                    `btn small${teams[i] === null ? ' primary' : ' ghost'}`,
+                  ),
+                  ...TEAM_LABELS.map((label, t) =>
+                    button(
+                      label,
+                      () => {
+                        // Three to a union: more than that and the race becomes
+                        // two blocks staring at each other.
+                        if (teams[i] !== t && teams.filter((x) => x === t).length >= 3) return;
+                        teams[i] = t;
+                        sfx.play('ui');
+                        render();
+                      },
+                      `btn small${teams[i] === t ? ' primary' : ' ghost'}`,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
+
+          el(
+            'p',
+            { class: 'hint', style: 'margin-top:10px' },
+            'Союз: до трёх мест под одной буквой. Союзники не бьют друг друга, делятся картами за зачистку и могут передавать собранные жизни, а победа одного засчитывается всем. Союзы можно собрать и по ходу партии, но здесь — заранее.',
+          ),
+          teams.some((t) => t !== null)
+            ? el(
+                'div',
+                { class: 'row', style: 'gap:8px;margin-top:6px' },
+                ...TEAM_LABELS.map((label, t) => {
+                  const members = names.slice(0, count).filter((_, i) => teams[i] === t);
+                  return members.length
+                    ? el(
+                        'span',
+                        { class: 'pill', style: `border-color:${TEAM_COLORS[t]};color:${TEAM_COLORS[t]}` },
+                        `Союз ${label}: ${members.join(' + ')}`,
+                      )
+                    : null;
+                }).filter((x): x is HTMLElement => x !== null),
+              )
+            : null,
 
           el('h3', { style: 'margin-top:16px' }, 'Дистанция'),
           el(
@@ -642,6 +698,7 @@ export function mainMenu(app: App): Scene {
                 app.setScene((a) =>
                   raceScene(a, {
                     names: names.slice(0, count),
+                    teams: teams.slice(0, count),
                     distance,
                     levels: a.campaignLevels(),
                     superId: a.profile.favouriteSuper,
