@@ -44,9 +44,10 @@ import {
   TEAM_LABELS,
   MIN_TURN_LIVES,
   TURN_SECONDS,
+  canDiscard,
   cardAllowed,
   cardsForTurn,
-  drawCard,
+  drawCardFor,
   freeTeam,
   giveCards,
   levelForCell,
@@ -434,7 +435,13 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
               if (!id) return el('div', { class: 'desc' }, `[${SEAT_KEY_LABELS[p.seat][i]}] — пусто`);
               const def = CARDS[id];
               const banned = !cardAllowed(def, p, active());
-              const why = !banned ? '' : def.gift ? ' — только союзнику' : ' — союзник';
+              const why = !banned
+                ? ''
+                : def.kind === 'buff'
+                  ? teammates(players, p).length
+                    ? ' — ждёт хода союзника'
+                    : ' — без союза сбросится'
+                  : ' — союзник';
               return el(
                 'div',
                 { class: 'desc', style: banned ? 'opacity:.4' : '' },
@@ -679,8 +686,14 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const target = active();
 
     if (!cardAllowed(def, from, target)) {
-      note(def.gift ? `${def.name} — только союзнику` : `${from.name}: союзника не бьём`, '#5a6472');
-      return;
+      // Dead weight can be burnt; a card waiting for an ally's turn is kept.
+      if (!canDiscard(def, from, players)) {
+        note(
+          def.kind === 'buff' ? `${def.name}: помогаем только союзникам` : `${from.name}: союзника не бьём`,
+          '#5a6472',
+        );
+        return;
+      }
     }
 
     if (online) {
@@ -713,6 +726,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     if (slot >= 0) from.stock.splice(slot, 1);
 
     const target = active();
+    // Not a throw but a discard: a lone racer burning a buff nobody can take.
+    if (!cardAllowed(def, from, target)) {
+      note(`${from.name} сбрасывает ${def.name}: некому дарить`, '#5a6472');
+      return;
+    }
     // The shield stops what is aimed at the field. A dice card is paperwork,
     // not an attack, so it is never blocked — and every client can therefore
     // apply it without knowing whether a shield was up.
@@ -812,13 +830,13 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     // Cards are drawn here, on the machine that earned them, and travel as ids
     // — the capsules caught this turn plus the clear bonus and the allies' cut.
     const awards: TurnAward[] = [];
-    const clearCards = Array.from({ length: cardsForTurn(result) }, () => drawLocalCard());
+    const clearCards = Array.from({ length: cardsForTurn(result) }, () => drawLocalCard(p));
     const own = [...earned, ...clearCards];
     earned = [];
     if (own.length) awards.push({ seat: p.seat, cards: own });
     if (cleared) {
       for (const mate of teammates(players, p)) {
-        awards.push({ seat: mate.seat, cards: Array.from({ length: ALLY_CARDS }, () => drawLocalCard()) });
+        awards.push({ seat: mate.seat, cards: Array.from({ length: ALLY_CARDS }, () => drawLocalCard(mate)) });
       }
     }
 
@@ -832,8 +850,8 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     beginRoll(rollDice(rng, result, p.diceMod).die, report);
   }
 
-  function drawLocalCard(): CardId {
-    return drawCard(localRng);
+  function drawLocalCard(who: RacePlayer): CardId {
+    return drawCardFor(who, players, localRng);
   }
 
   /** Hands out the cards a turn paid. Runs on every client from the same list. */
@@ -1229,7 +1247,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         if (banned) {
           ctx.textAlign = 'right';
           ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.fillText(def.gift ? 'только своим' : 'союзник', w - pad, ty);
+          ctx.fillText(
+            def.kind === 'buff' ? (teammates(players, other).length ? 'своим' : 'сброс') : 'союзник',
+            w - pad,
+            ty,
+          );
           ctx.textAlign = 'left';
         }
         ctx.globalAlpha = 1;
@@ -1544,7 +1566,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         // Cards are earned at the paddle, never handed out by a timer.
         if (e.t === 'powerup' && e.id === 'card') {
           const p = active();
-          if (giveCards(p, 1, rng) > 0) note(`${p.name}: +1 карта в запас`, '#ffd24d');
+          if (giveCards(p, 1, localRng, players) > 0) note(`${p.name}: +1 карта в запас`, '#ffd24d');
           else note(`Запас полон (${STOCK_MAX})`, '#5a6472');
         }
       }

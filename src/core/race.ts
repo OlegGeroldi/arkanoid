@@ -298,10 +298,10 @@ export function makePlayer(seat: number, name: string, rng: Rng): RacePlayer {
   };
 }
 
-export function giveCards(p: RacePlayer, n: number, rng: Rng): number {
+export function giveCards(p: RacePlayer, n: number, rng: Rng, players: RacePlayer[] = []): number {
   let given = 0;
   for (let i = 0; i < n && p.stock.length < STOCK_MAX; i++) {
-    p.stock.push(drawCard(rng));
+    p.stock.push(players.length ? drawCardFor(p, players, rng) : drawCard(rng));
     given++;
   }
   return given;
@@ -355,7 +355,8 @@ export interface CardDef {
   icon: string;
   color: string;
   kind: 'buff' | 'debuff';
-  /** Only playable on an ally, never on yourself. */
+  /** Marks the strong ally-only cards. Every buff is ally-only now; this is
+   *  what tells them apart in the interface. */
   gift?: boolean;
   desc: string;
   /** Relative frequency in the deck. */
@@ -402,6 +403,16 @@ export function drawCard(rng: Rng): CardId {
   return rng.pick(CARD_POOL);
 }
 
+/** A draw for a particular player. Sixty per cent of the deck helps somebody,
+ *  and a lone racer has nobody to help — so their draws lean towards what they
+ *  can actually throw. One retry, not a filter: a union may still be formed,
+ *  and gifts should keep turning up as the reason to form one. */
+export function drawCardFor(p: RacePlayer, players: RacePlayer[], rng: Rng): CardId {
+  const id = drawCard(rng);
+  if (teammates(players, p).length) return id;
+  return CARDS[id].kind === 'buff' ? drawCard(rng) : id;
+}
+
 /** Teammates cannot hit each other: buffs only, or a union means nothing. There
  *  is no price on a card beyond having earned it. */
 export function allied(a: RacePlayer, b: RacePlayer): boolean {
@@ -412,11 +423,18 @@ export function teammates(players: RacePlayer[], p: RacePlayer): RacePlayer[] {
   return players.filter((q) => allied(p, q));
 }
 
+/** One rule, both ways round: you help your union and you hurt everybody else.
+ *  Handing a rival a multiball was never anything but a mistake, so a buff now
+ *  only ever travels to an ally — which is what makes a union worth having. */
 export function cardAllowed(def: CardDef, from: RacePlayer, to: RacePlayer): boolean {
-  // A gift needs somebody to give it to; a debuff needs somebody who is not a
-  // friend. Both rules are about the same union.
-  if (def.gift) return allied(from, to);
-  return !(allied(from, to) && def.kind === 'debuff');
+  return allied(from, to) ? def.kind === 'buff' : def.kind === 'debuff';
+}
+
+/** A lone racer's buffs are dead weight — nobody to give them to — so they may
+ *  be burnt for a fresh draw. With an ally they are worth holding for their
+ *  turn, so then they stay in hand. */
+export function canDiscard(def: CardDef, from: RacePlayer, players: RacePlayer[]): boolean {
+  return def.kind === 'buff' && teammates(players, from).length === 0;
 }
 
 /** The smallest free team number, or null when all three are taken. */
@@ -779,7 +797,7 @@ export function resolveCell(
       player.bonusSeconds -= 20;
       return { ...base, text: 'Мытарь: −20 секунд на следующем ходу' };
     case 'stash':
-      giveCards(player, 2, rng);
+      giveCards(player, 2, rng, players);
       return { ...base, text: 'Тайник: две карты в запас' };
     case 'reverse':
       return { ...base, reversed: true, text: 'Реверс: порядок ходов перевёрнут' };
