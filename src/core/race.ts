@@ -31,9 +31,14 @@ export const MIN_TURN_LIVES = 1;
 export const BOSS_LIVES_BONUS = 1;
 
 /** Cards are earned, never regenerated: you catch them at your own paddle and
- *  spend them on other people's turns. Three of your stock sit on your keys. */
+ *  spend them on other people's turns. Three of them sit on your keys; the rest
+ *  wait in reserve. */
 export const HAND_SIZE = 3;
-export const START_CARDS = 3;
+export const START_CARDS = 5;
+/** Seconds a slot takes to recharge after it fires. The wait is not dead time:
+ *  while a slot is recharging its key changes job and leafs through the reserve,
+ *  so you choose what it will hold next. Ready, the same key throws. */
+export const CARD_COOLDOWN = 6;
 export const STOCK_MAX = 12;
 export const CLEAR_CARDS = 2;
 export const BOSS_CLEAR_CARDS = 3;
@@ -272,8 +277,12 @@ export interface RacePlayer {
   name: string;
   accent: string;
   cell: number;
-  /** Cards earned and not yet thrown. The first HAND_SIZE sit on the keys. */
-  stock: CardId[];
+  /** The three cards on this seat's keys; null while a slot is empty. */
+  hand: (CardId | null)[];
+  /** Everything else earned and not yet played. */
+  reserve: CardId[];
+  /** Seconds until each slot can fire again. Above zero, its key selects. */
+  cd: number[];
   /** Lives carried from turn to turn. */
   lives: number;
   /** Turns to sit out, from the cell that skips you. */
@@ -295,12 +304,14 @@ export interface RacePlayer {
 }
 
 export function makePlayer(seat: number, name: string, rng: Rng): RacePlayer {
-  return {
+  const p: RacePlayer = {
     seat,
     name,
     accent: SEAT_COLORS[seat % SEAT_COLORS.length],
     cell: 0,
-    stock: Array.from({ length: START_CARDS }, () => drawCard(rng)),
+    hand: new Array(HAND_SIZE).fill(null),
+    reserve: Array.from({ length: START_CARDS }, () => drawCard(rng)),
+    cd: new Array(HAND_SIZE).fill(0),
     lives: RACE_START_LIVES,
     skipTurns: 0,
     chargedSuper: false,
@@ -311,15 +322,71 @@ export function makePlayer(seat: number, name: string, rng: Rng): RacePlayer {
     turns: 0,
     cleared: 0,
   };
+  // Deal the opening hand off the reserve, or every seat starts with three
+  // empty keys and cards it cannot reach.
+  fillHand(p);
+  return p;
+}
+
+/** Every card a seat owns: what is on the keys plus what waits behind. */
+export function cardCount(p: RacePlayer): number {
+  return p.hand.filter((c) => c !== null).length + p.reserve.length;
 }
 
 export function giveCards(p: RacePlayer, n: number, rng: Rng, players: RacePlayer[] = []): number {
   let given = 0;
-  for (let i = 0; i < n && p.stock.length < STOCK_MAX; i++) {
-    p.stock.push(players.length ? drawCardFor(p, players, rng) : drawCard(rng));
+  for (let i = 0; i < n && cardCount(p) < STOCK_MAX; i++) {
+    p.reserve.push(players.length ? drawCardFor(p, players, rng) : drawCard(rng));
     given++;
   }
+  fillHand(p);
   return given;
+}
+
+/** Empty slots take the next card in reserve. A slot is filled the moment it
+ *  fires, so there is always a candidate to look at — and to change. */
+export function fillHand(p: RacePlayer): void {
+  for (let i = 0; i < HAND_SIZE; i++) {
+    if (p.hand[i] === null && p.reserve.length) p.hand[i] = p.reserve.shift()!;
+  }
+}
+
+/** Swaps the slot's card for the next one in reserve, sending the old one to
+ *  the back. The other two slots are left alone: only the key you pressed
+ *  changes. */
+export function cycleCard(p: RacePlayer, slot: number): CardId | null {
+  const current = p.hand[slot];
+  if (!p.reserve.length) return null;
+  p.hand[slot] = p.reserve.shift()!;
+  if (current) p.reserve.push(current);
+  return p.hand[slot];
+}
+
+/** Fires the slot: hands back the card, starts its cooldown and pulls the next
+ *  candidate in behind it. */
+export function playFromHand(p: RacePlayer, slot: number): CardId | null {
+  const id = p.hand[slot];
+  if (!id) return null;
+  p.hand[slot] = null;
+  p.cd[slot] = CARD_COOLDOWN;
+  fillHand(p);
+  return id;
+}
+
+/** Runs the slot clocks. */
+export function tickCards(p: RacePlayer, dt: number): void {
+  for (let i = 0; i < p.cd.length; i++) {
+    if (p.cd[i] > 0) p.cd[i] = Math.max(0, p.cd[i] - dt);
+  }
+}
+
+/** Everyone starts a turn armed: a cooldown left over from the previous turn
+ *  would be punishing for reasons nobody could see. */
+export function armCards(players: RacePlayer[]): void {
+  for (const p of players) {
+    p.cd.fill(0);
+    fillHand(p);
+  }
 }
 
 // ------------------------------------------------------------------ cards ---
@@ -443,20 +510,6 @@ export function teammates(players: RacePlayer[], p: RacePlayer): RacePlayer[] {
  *  only ever travels to an ally — which is what makes a union worth having. */
 export function cardAllowed(def: CardDef, from: RacePlayer, to: RacePlayer): boolean {
   return allied(from, to) ? def.kind === 'buff' : def.kind === 'debuff';
-}
-
-/** Sends the card at `slot` to the back of the stock, bringing the next one up.
- *
- *  The hand is the first three of the stock, so without this everything behind
- *  them is unreachable: hold a debuff during an ally's turn and the buff you
- *  wanted to give them never surfaces. Pressing the key of a card you cannot
- *  play right now cycles it away instead of doing nothing. */
-export function cycleCard(p: RacePlayer, slot: number): CardId | null {
-  const id = p.stock[slot];
-  if (id === undefined || p.stock.length <= 1) return null;
-  p.stock.splice(slot, 1);
-  p.stock.push(id);
-  return id;
 }
 
 /** The smallest free team number, or null when all three are taken. */

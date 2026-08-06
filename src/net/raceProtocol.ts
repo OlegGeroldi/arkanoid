@@ -37,6 +37,8 @@ export type RaceUp =
   | { k: 'turnEnd'; reversed: boolean; rewind?: boolean }
   /** A watcher throws a card at the active seat. */
   | { k: 'card'; from: number; card: CardId }
+  /** A watcher leafs a recharging slot to the next card in their reserve. */
+  | { k: 'cycle'; from: number; slot: number }
   /** The active client's field, for the watchers. */
   | { k: 'snapshot'; snap: RaceSnapshot };
 
@@ -49,6 +51,7 @@ export type RaceDown =
   /** The die for the turn just played, with the result everyone scores it by. */
   | { k: 'roll'; seat: number; index: number; die: number; result: TurnResult }
   | { k: 'card'; from: number; card: CardId }
+  | { k: 'cycle'; from: number; slot: number }
   | { k: 'snapshot'; seat: number; snap: RaceSnapshot }
   /** The active client went quiet: its turn is burnt and play moves on. */
   | { k: 'timeout'; seat: number }

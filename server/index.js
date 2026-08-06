@@ -315,6 +315,16 @@ function handleRace(ws, msg) {
       break;
     }
 
+    case 'cycle': {
+      // Choosing what a recharging slot will hold. Everyone draws everyone's
+      // hand, so the change has to reach them all.
+      if (!race.started) return;
+      const owner = race.seats[m.from];
+      if (!owner || owner.owner !== ws.peerId) return;
+      broadcast(room, { type: 'race', msg: { k: 'cycle', from: m.from, slot: m.slot } });
+      break;
+    }
+
     case 'snapshot': {
       const seat = race.seats[race.turn];
       if (!race.started || !seat || seat.owner !== ws.peerId) return;

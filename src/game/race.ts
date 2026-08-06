@@ -44,10 +44,15 @@ import {
   TEAM_LABELS,
   MIN_TURN_LIVES,
   TURN_SECONDS,
+  armCards,
   cardAllowed,
+  cardCount,
   cardsForTurn,
   cycleCard,
   drawCardFor,
+  fillHand,
+  playFromHand,
+  tickCards,
   freeTeam,
   giveCards,
   levelForCell,
@@ -198,6 +203,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         turn: (seat, index) => onTurn(seat, index),
         roll: (seat, index, die, result) => onRoll(seat, index, die, result),
         card: (from, card) => onCard(from, card),
+        cycle: (from, slot) => {
+          const who = players[from];
+          if (who) cycleCard(who, slot);
+        },
         snapshot: (seat, snap) => onSnapshot(seat, snap),
         timeout: (seat) => onTimeout(seat),
       })
@@ -318,7 +327,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           { class: 'race-facts' },
           fact(`${p.cell}`, `из ${distance} клеток`, p.accent),
           fact(`♥ ${lives}`, level.boss ? 'жизней (+1 взаймы)' : 'жизней', '#ff5fa2'),
-          fact(`${p.stock.length}`, 'карт в запасе', '#ffd24d'),
+          fact(`${cardCount(p)}`, 'карт в запасе', '#ffd24d'),
           fact(`${seconds}`, 'секунд на ход', seconds < 75 ? '#ff4d6d' : '#3ddc84'),
         ),
         finale
@@ -413,7 +422,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
             class: 'pill',
             style: `border-color:${p.accent};color:${p.accent}${p.seat === turnSeat ? ';font-weight:800' : ''}`,
           },
-          `${p.name} · клетка ${p.cell} · ♥ ${p.lives} · карт ${p.stock.length}${p.team !== null ? ` · союз ${TEAM_LABELS[p.team]}` : ''}`,
+          `${p.name} · клетка ${p.cell} · ♥ ${p.lives} · карт ${cardCount(p)}${p.team !== null ? ` · союз ${TEAM_LABELS[p.team]}` : ''}`,
         ),
       ),
     );
@@ -429,13 +438,13 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           el(
             'div',
             { class: 'card', style: `border-color:${p.accent}44` },
-            el('div', { class: 'title', style: `color:${p.accent}` }, `${p.name} · карт ${p.stock.length}`),
+            el('div', { class: 'title', style: `color:${p.accent}` }, `${p.name} · карт ${cardCount(p)}`),
             ...Array.from({ length: HAND_SIZE }, (_, i) => {
-              const id = p.stock[i];
+              const id = p.hand[i];
               if (!id) return el('div', { class: 'desc' }, `[${SEAT_KEY_LABELS[p.seat][i]}] — пусто`);
               const def = CARDS[id];
               const banned = !cardAllowed(def, p, active());
-              const why = banned ? ' — клавиша уводит в конец запаса' : '';
+              const why = banned ? ' — клавиша выберет другую' : '';
               return el(
                 'div',
                 { class: 'desc', style: banned ? 'opacity:.4' : '' },
@@ -474,7 +483,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         button(
           `${p.name} — выйти из союза`,
           () => {
-            p.stock.splice(0, Math.ceil(p.stock.length / 2));
+            p.reserve.splice(0, Math.ceil(p.reserve.length / 2));
             leaveTeam(p);
             sfx.play('ui');
             showBoard();
@@ -576,6 +585,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     livesAtStart = livesFor(p, level);
     p.bonusSeconds = 0;
     bestCombo = 0;
+    armCards(players);
     jamCharges = JAM_PER_TURN;
     shieldArmed = false;
     paused = false;
@@ -674,16 +684,22 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   function playCard(from: RacePlayer, slot: number): void {
     if (phase !== 'play' && phase !== 'watch') return;
     if (from.seat === turnSeat) return;
-    const id = from.stock[slot];
+    const id = from.hand[slot];
     if (!id) return;
     const def = CARDS[id];
     const target = active();
 
-    if (!cardAllowed(def, from, target)) {
-      // Not a throw: the card steps to the back so the next one comes up. This
-      // is the only way to reach a stock deeper than three cards.
-      cycleCard(from, slot);
-      note(`${def.name} → в конец запаса`, '#5a6472');
+    // The same key does two jobs. While the slot is recharging — or while what
+    // it holds cannot be played at this target — it leafs through the reserve
+    // and you choose what the slot will hold. Ready and playable, it throws.
+    if (from.cd[slot] > 0 || !cardAllowed(def, from, target)) {
+      const next = cycleCard(from, slot);
+      if (!next) {
+        note(`${def.name}: менять не на что`, '#5a6472');
+        return;
+      }
+      if (online) netio?.cycleCard(from.seat, slot);
+      note(`${from.name}: выбрано ${CARDS[next].name}`, '#5a6472');
       sfx.play('ui');
       return;
     }
@@ -692,7 +708,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       netio?.throwCard(from.seat, id);
       return;
     }
-    from.stock.splice(slot, 1);
+    playFromHand(from, slot);
 
     // The counter costs the thrower the card anyway — that is what makes
     // baiting the block worth doing.
@@ -714,8 +730,8 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const from = players[fromSeat];
     const def = CARDS[id];
     if (!from || !def) return;
-    const slot = from.stock.indexOf(id);
-    if (slot >= 0) from.stock.splice(slot, 1);
+    const slot = from.hand.indexOf(id);
+    if (slot >= 0) playFromHand(from, slot);
 
     const target = active();
     // The shield stops what is aimed at the field. A dice card is paperwork,
@@ -848,8 +864,9 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       const who = players[award.seat];
       if (!who) continue;
       for (const card of award.cards) {
-        if (who.stock.length < STOCK_MAX) who.stock.push(card);
+        if (cardCount(who) < STOCK_MAX) who.reserve.push(card);
       }
+      fillHand(who);
       if (award.cards.length && who === active()) note(`+${award.cards.length} карт за ход`, '#ffd24d');
     }
   }
@@ -1062,7 +1079,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         { class: 'race-facts' },
         fact(`${p.cell}`, `клетка из ${distance}`, p.accent),
         fact(`♥ ${p.lives}`, 'жизней', '#ff5fa2'),
-        fact(`${p.stock.length}`, 'карт', '#ffd24d'),
+        fact(`${cardCount(p)}`, 'карт', '#ffd24d'),
         fact(leader.name, `впереди · клетка ${leader.cell}`, leader.accent),
       ),
       said.length ? el('div', { class: 'commentary' }, ...said.map((text) => el('p', {}, text))) : el('div', {}),
@@ -1211,13 +1228,13 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.font = `600 11px ${FONT}`;
-      ctx.fillText(`карт ${other.stock.length}`, w - pad, ty);
+      ctx.fillText(`карт ${cardCount(other)} · в резерве ${other.reserve.length}`, w - pad, ty);
       ctx.textAlign = 'left';
       ty += 6;
 
       for (let i = 0; i < HAND_SIZE; i++) {
         ty += 17;
-        const id = other.stock[i];
+        const id = other.hand[i];
         const key = SEAT_KEY_LABELS[other.seat]?.[i] ?? '?';
         if (!id) {
           ctx.fillStyle = 'rgba(255,255,255,0.22)';
@@ -1226,17 +1243,19 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
           continue;
         }
         const def = CARDS[id];
+        const cooling = other.cd[i] > 0;
         const banned = !cardAllowed(def, other, p);
-        ctx.globalAlpha = banned ? 0.38 : 1;
+        // Dimmed means the key will choose rather than throw.
+        ctx.globalAlpha = cooling || banned ? 0.42 : 1;
         ctx.fillStyle = def.color;
         ctx.font = `700 11px ${FONT}`;
         ctx.fillText(`${key}  ${def.icon} ${def.name}`, pad + 4, ty);
-        if (banned) {
-          ctx.textAlign = 'right';
-          ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.fillText('в конец ↻', w - pad, ty);
-          ctx.textAlign = 'left';
-        }
+        ctx.textAlign = 'right';
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        if (cooling) ctx.fillText(`выбор ${other.cd[i].toFixed(1)}`, w - pad, ty);
+        else if (banned) ctx.fillText('выбор ↻', w - pad, ty);
+        else ctx.fillText('готово', w - pad, ty);
+        ctx.textAlign = 'left';
         ctx.globalAlpha = 1;
       }
       ty += 22;
@@ -1506,6 +1525,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       }
 
       if (phase === 'watch') {
+        for (const p of players) tickCards(p, dt);
         mirrorAge += dt;
         // The clock keeps running between packets so the countdown does not
         // stutter; each snapshot corrects it.
@@ -1521,6 +1541,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         return;
       }
       fx.update(dt);
+      for (const p of players) tickCards(p, dt);
 
       if (app.input.wasPressed(['Escape'])) {
         paused = !paused;

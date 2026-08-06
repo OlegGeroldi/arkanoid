@@ -21,6 +21,7 @@ export interface RaceHandlers {
   turn?(seat: number, index: number): void;
   roll?(seat: number, index: number, die: number, result: TurnReport | null): void;
   card?(from: number, card: CardId): void;
+  cycle?(from: number, slot: number): void;
   snapshot?(seat: number, snap: RaceSnapshot): void;
   timeout?(seat: number): void;
   resume?(data: { seed: number; distance: number; seats: RaceSeat[]; log: RaceLogEntry[]; turn: number; index: number }): void;
@@ -53,6 +54,9 @@ export class RaceNet {
         break;
       case 'card':
         h.card?.(Number(m.from), m.card as CardId);
+        break;
+      case 'cycle':
+        h.cycle?.(Number(m.from), Number(m.slot));
         break;
       case 'snapshot':
         h.snapshot?.(Number(m.seat), m.snap as RaceSnapshot);
@@ -102,6 +106,12 @@ export class RaceNet {
 
   throwCard(from: number, card: CardId): void {
     this.send({ k: 'card', from, card });
+  }
+
+  /** Choosing what a recharging slot will hold. Everyone sees everyone's hand,
+   *  so a change of mind has to travel too. */
+  cycleCard(from: number, slot: number): void {
+    this.send({ k: 'cycle', from, slot });
   }
 
   sendSnapshot(snap: RaceSnapshot): void {
