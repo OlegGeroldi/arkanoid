@@ -44,9 +44,9 @@ import {
   TEAM_LABELS,
   MIN_TURN_LIVES,
   TURN_SECONDS,
-  canDiscard,
   cardAllowed,
   cardsForTurn,
+  cycleCard,
   drawCardFor,
   freeTeam,
   giveCards,
@@ -237,7 +237,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   }
 
   function levelFor(p: RacePlayer): LevelData {
-    return opts.levels[levelForCell(p.cell, distance, opts.levels.length)];
+    return opts.levels[levelForCell(p.cell, distance, opts.levels.length, rng.seedValue)];
   }
 
   function note(text: string, color: string): void {
@@ -435,13 +435,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
               if (!id) return el('div', { class: 'desc' }, `[${SEAT_KEY_LABELS[p.seat][i]}] — пусто`);
               const def = CARDS[id];
               const banned = !cardAllowed(def, p, active());
-              const why = !banned
-                ? ''
-                : def.kind === 'buff'
-                  ? teammates(players, p).length
-                    ? ' — ждёт хода союзника'
-                    : ' — без союза сбросится'
-                  : ' — союзник';
+              const why = banned ? ' — клавиша уводит в конец запаса' : '';
               return el(
                 'div',
                 { class: 'desc', style: banned ? 'opacity:.4' : '' },
@@ -686,14 +680,12 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const target = active();
 
     if (!cardAllowed(def, from, target)) {
-      // Dead weight can be burnt; a card waiting for an ally's turn is kept.
-      if (!canDiscard(def, from, players)) {
-        note(
-          def.kind === 'buff' ? `${def.name}: помогаем только союзникам` : `${from.name}: союзника не бьём`,
-          '#5a6472',
-        );
-        return;
-      }
+      // Not a throw: the card steps to the back so the next one comes up. This
+      // is the only way to reach a stock deeper than three cards.
+      cycleCard(from, slot);
+      note(`${def.name} → в конец запаса`, '#5a6472');
+      sfx.play('ui');
+      return;
     }
 
     if (online) {
@@ -726,11 +718,6 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     if (slot >= 0) from.stock.splice(slot, 1);
 
     const target = active();
-    // Not a throw but a discard: a lone racer burning a buff nobody can take.
-    if (!cardAllowed(def, from, target)) {
-      note(`${from.name} сбрасывает ${def.name}: некому дарить`, '#5a6472');
-      return;
-    }
     // The shield stops what is aimed at the field. A dice card is paperwork,
     // not an attack, so it is never blocked — and every client can therefore
     // apply it without knowing whether a shield was up.
@@ -1247,11 +1234,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         if (banned) {
           ctx.textAlign = 'right';
           ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.fillText(
-            def.kind === 'buff' ? (teammates(players, other).length ? 'своим' : 'сброс') : 'союзник',
-            w - pad,
-            ty,
-          );
+          ctx.fillText('в конец ↻', w - pad, ty);
           ctx.textAlign = 'left';
         }
         ctx.globalAlpha = 1;

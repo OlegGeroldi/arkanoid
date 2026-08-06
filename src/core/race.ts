@@ -217,10 +217,25 @@ export function makeBoard(distance: number, rng: Rng): RaceCell[] {
 }
 
 /** Which campaign level a cell plays. The track is stretched over the whole
- *  campaign, so a blitz race still ends at DOH. */
-export function levelForCell(cell: number, distance: number, total: number): number {
+ *  campaign, so a blitz race still ends at DOH.
+ *
+ *  The seed nudges every cell by up to two levels either way. Without it the
+ *  opening level was the same in every single race — and the whole track was,
+ *  too. The last cell is exempt: the finale is DOH and nothing else. */
+export function levelForCell(cell: number, distance: number, total: number, seed = 0): number {
   if (distance <= 0) return 0;
-  return Math.min(total - 1, Math.max(0, Math.round((cell / distance) * (total - 1))));
+  const base = Math.round((cell / distance) * (total - 1));
+  if (cell >= distance) return total - 1;
+  // A small deterministic hash: same seed and cell, same level, on every client.
+  let h = (seed ^ ((cell + 1) * 2654435761)) >>> 0;
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d) >>> 0;
+  // The opening cell draws from the eight hand-made openers rather than being
+  // nudged: level 1 was the same in every race, and it is the level everybody
+  // sees most often.
+  if (cell === 0) return h % 8;
+  const jitter = (h % 7) - 3;
+  return Math.min(total - 2, Math.max(0, base + jitter));
 }
 
 // ---------------------------------------------------------------- players ---
@@ -430,11 +445,18 @@ export function cardAllowed(def: CardDef, from: RacePlayer, to: RacePlayer): boo
   return allied(from, to) ? def.kind === 'buff' : def.kind === 'debuff';
 }
 
-/** A lone racer's buffs are dead weight — nobody to give them to — so they may
- *  be burnt for a fresh draw. With an ally they are worth holding for their
- *  turn, so then they stay in hand. */
-export function canDiscard(def: CardDef, from: RacePlayer, players: RacePlayer[]): boolean {
-  return def.kind === 'buff' && teammates(players, from).length === 0;
+/** Sends the card at `slot` to the back of the stock, bringing the next one up.
+ *
+ *  The hand is the first three of the stock, so without this everything behind
+ *  them is unreachable: hold a debuff during an ally's turn and the buff you
+ *  wanted to give them never surfaces. Pressing the key of a card you cannot
+ *  play right now cycles it away instead of doing nothing. */
+export function cycleCard(p: RacePlayer, slot: number): CardId | null {
+  const id = p.stock[slot];
+  if (id === undefined || p.stock.length <= 1) return null;
+  p.stock.splice(slot, 1);
+  p.stock.push(id);
+  return id;
 }
 
 /** The smallest free team number, or null when all three are taken. */
