@@ -123,6 +123,9 @@ export class NetClient {
           // Game modes talk to each other through this channel.
           for (const fn of this.relayListeners) fn(msg.payload, String(msg.id ?? ''));
           break;
+        case 'race':
+          for (const fn of this.raceListeners) fn(msg.msg);
+          break;
         default:
           break;
       }
@@ -165,6 +168,19 @@ export class NetClient {
   relay(payload: unknown): void {
     this.send({ type: 'relay', payload });
   }
+
+  /** The race talks to the referee on its own channel rather than through
+   *  relay: the server has to read these, not just forward them. */
+  sendRace(msg: unknown): void {
+    this.send({ type: 'race', msg });
+  }
+
+  onRace(fn: (msg: unknown) => void): () => void {
+    this.raceListeners.add(fn);
+    return () => this.raceListeners.delete(fn);
+  }
+
+  private raceListeners = new Set<(msg: unknown) => void>();
 
   disconnect(): void {
     this.name = '';

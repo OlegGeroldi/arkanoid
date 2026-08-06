@@ -345,13 +345,34 @@ export function dieLine(rng: Rng, die: number): string {
   return rng.pick(DIE_LINES[Math.min(5, Math.max(0, die - 1))]);
 }
 
-/** Death costs the whole move. Anything else advances at least one cell, so a
- *  bad level never freezes you in place. */
-export function rollDice(rng: Rng, r: TurnResult, diceMod: number): Roll {
-  const die = rng.int(1, 7);
+/** Scores a die that has already been thrown. Over the network the die comes
+ *  from the server, and every client has to arrive at the same total — so the
+ *  scoring lives here, apart from the throwing. */
+export function makeRoll(die: number, rng: Rng, r: TurnResult, diceMod: number): Roll {
   const bonuses = playBonuses(r, diceMod);
   const sum = bonuses.reduce((a, b) => a + b.value, 0);
   return { die, bonuses, total: Math.max(1, die + sum), line: dieLine(rng, die) };
+}
+
+/** Death costs the whole move. Anything else advances at least one cell, so a
+ *  bad level never freezes you in place. */
+export function rollDice(rng: Rng, r: TurnResult, diceMod: number): Roll {
+  return makeRoll(rng.int(1, 7), rng, r, diceMod);
+}
+
+/** Cards handed out by a turn, per seat. Over the network these are drawn by
+ *  the client that played the turn and travel as plain ids: card draws must not
+ *  come off the shared random stream, or a capsule caught on one screen would
+ *  desync every other one. */
+export interface TurnAward {
+  seat: number;
+  cards: CardId[];
+}
+
+/** The turn result as it goes over the wire: what the level did, plus the cards
+ *  it paid out. */
+export interface TurnReport extends TurnResult {
+  awards: TurnAward[];
 }
 
 /** Cards the turn itself paid out, on top of the ones caught at the paddle. */

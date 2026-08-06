@@ -1,5 +1,17 @@
 import { App, fitBox, type Scene } from '../app';
-import { ARENA_H, ARENA_W } from '../core/constants';
+import {
+  ARENA_H,
+  ARENA_W,
+  BRICK_H,
+  GRID_LEFT,
+  GRID_TOP,
+  PADDLE_H,
+  PADDLE_Y,
+  ROWS,
+  WALL,
+  brickWidthFor,
+} from '../core/constants';
+import { BRICK_KINDS, isBrickCode } from '../core/bricks';
 import { Arena, noInput } from '../core/arena';
 import type { LevelData } from '../core/level';
 import type { SuperId } from '../core/supers';
@@ -33,23 +45,34 @@ import {
   TURN_SECONDS,
   cardAllowed,
   cardsForTurn,
+  drawCard,
   freeTeam,
   giveCards,
   levelForCell,
   makeBoard,
   makePlayer,
+  makeRoll,
   raceComments,
   resolveCell,
   rollDice,
   snapshot,
   teammates,
   type CardDef,
+  type CardId,
   type RaceCell,
   type RacePlayer,
   type Roll,
   type Standings,
+  type TurnAward,
+  type TurnReport,
   type TurnResult,
 } from '../core/race';
+import { RaceNet, type RaceLogEntry } from './raceNet';
+import {
+  RACE_CELLS_INTERVAL,
+  RACE_SNAPSHOT_INTERVAL,
+  type RaceSnapshot,
+} from '../net/raceProtocol';
 
 const HUD_W = 236;
 const PANEL_W = 292;
@@ -63,17 +86,28 @@ const ROLL_SPIN = 0.9;
 /** Seconds per cell while the token walks the track. */
 const STEP_TIME = 0.11;
 
+/** Everything the networked race needs that the hot-seat one does not. Absent,
+ *  the mode behaves exactly as it did on one laptop. */
+export interface RaceNetOptions {
+  seed: number;
+  /** Seats this client plays; the rest it watches. */
+  mySeats: number[];
+  /** The race so far, when joining or coming back after a reload. */
+  resume?: { log: RaceLogEntry[]; turn: number; index: number };
+}
+
 export interface RaceOptions {
   names: string[];
   /** Union per seat, agreed before the match; null is a lone racer. */
   teams?: (number | null)[];
   distance: number;
+  net?: RaceNetOptions;
   levels: LevelData[];
   superId: SuperId;
   speed?: number;
 }
 
-type Phase = 'board' | 'play' | 'roll' | 'move' | 'over';
+type Phase = 'board' | 'play' | 'watch' | 'roll' | 'move' | 'over';
 
 interface LogLine {
   text: string;
@@ -84,7 +118,14 @@ interface LogLine {
 /** Hot-seat race: everyone shares one keyboard, one plays a short level against
  *  a countdown, and the rest spend cards they earned in their own turns. */
 export function raceScene(app: App, opts: RaceOptions): Scene {
-  const rng = new Rng(Date.now() >>> 0);
+  const netOpts = opts.net ?? null;
+  const online = netOpts !== null;
+  /** Shared stream: the board and the opening hands come off this, so every
+   *  client that was dealt the same seed builds exactly the same race. */
+  const rng = new Rng(netOpts ? netOpts.seed >>> 0 : Date.now() >>> 0);
+  /** Local stream, for anything that must NOT be shared — card draws happen on
+   *  the client that earned them and travel as ids. */
+  const localRng = new Rng((Date.now() ^ 0x9e3779b9) >>> 0);
   const distance = opts.distance;
   const cells = makeBoard(distance, rng);
   const players = opts.names.map((n, i) => {
@@ -98,6 +139,9 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
 
   let phase: Phase = 'board';
   let turnSeat = 0;
+  /** Turn counter, and the random stream that goes with it: cell effects draw
+   *  from `turnRng`, so "Прыжок: вперёд на 6" is six on every screen. */
+  let turnIndex = 0;
   /** Flipped for the rest of the match by a reverse cell. */
   let direction: 1 | -1 = 1;
   let round = 1;
@@ -131,11 +175,47 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   /** The last few lines said, kept for the board screen. */
   const feed: string[] = [];
 
+  // Network state. All of it is inert in hot-seat.
+  const mine = new Set(netOpts?.mySeats ?? []);
+  /** Cards this client's active seat picked up, to be published at turn end. */
+  let earned: CardId[] = [];
+  /** Whether the cell that just fired flipped the turn order. */
+  let turnReversed = false;
+  /** The active player's field as last seen by a watcher. */
+  let mirror: RaceSnapshot | null = null;
+  let mirrorAge = 0;
+  let mirrorSeq = -1;
+  let snapTimer = 0;
+  let cellsTimer = 0;
+  let lastCells = '';
+  let lastBroken = -1;
+  const netio = online
+    ? new RaceNet({
+        turn: (seat, index) => onTurn(seat, index),
+        roll: (seat, index, die, result) => onRoll(seat, index, die, result),
+        card: (from, card) => onCard(from, card),
+        snapshot: (seat, snap) => onSnapshot(seat, snap),
+        timeout: (seat) => onTimeout(seat),
+      })
+    : null;
+
   music.setScene('menu');
   showBoard();
 
   function active(): RacePlayer {
     return players[turnSeat];
+  }
+
+  /** Its own stream per turn, keyed by the shared seed. Cell effects and the
+   *  die's line draw from this, so every client narrates the same turn. */
+  function turnRng(): Rng {
+    const seed = netOpts ? netOpts.seed : rng.seedValue;
+    return new Rng((seed ^ ((turnIndex + 1) * 2654435761)) >>> 0);
+  }
+
+  /** In hot-seat every seat is played here; online only the claimed ones. */
+  function isMine(seat: number): boolean {
+    return !online || mine.has(seat);
   }
 
   function isFinale(p: RacePlayer): boolean {
@@ -247,8 +327,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         el(
           'div',
           { class: 'row', style: 'margin-top:20px' },
-          button(finale ? 'На мега-босса' : 'Играть уровень', startTurn, 'btn primary'),
-          button('В меню', () => app.setScene(mainMenu), 'btn ghost'),
+          isMine(turnSeat)
+            ? button(finale ? 'На мега-босса' : 'Играть уровень', startTurn, 'btn primary')
+            : button(`Смотреть ход: ${p.name}`, startWatch, 'btn primary'),
+          button('В меню', leaveRace, 'btn ghost'),
         ),
       ),
     );
@@ -455,24 +537,87 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     sfx.play('ui');
   }
 
-  /** A waiting player pressed one of their three keys. */
+  /** Someone else's turn: no arena here, just their field as it arrives and our
+   *  own hand on our own keys. */
+  function startWatch(): void {
+    phase = 'watch';
+    arena = null;
+    mirror = null;
+    mirrorAge = 0;
+    mirrorSeq = -1;
+    log.length = 0;
+    app.overlay.replaceChildren();
+    app.overlay.classList.remove('interactive');
+    music.setScene('versus');
+  }
+
+  /** Packs the field for the watchers. The brick wall is the bulk of it and it
+   *  changes rarely, so it only goes out when it actually changed — that is
+   *  what keeps a five-watcher room cheap. */
+  function makeSnapshot(a: Arena, withCells: boolean): RaceSnapshot {
+    let cells = '';
+    if (withCells) {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < a.cols; c++) {
+          const b = a.grid[r * a.cols + c];
+          cells += b && b.alive ? b.kind.code : '0';
+        }
+      }
+    }
+    const changed = withCells && cells !== lastCells;
+    if (changed) lastCells = cells;
+    return {
+      cells: changed ? cells : undefined,
+      cols: a.cols,
+      paddleX: Math.round(a.paddleX),
+      paddleW: Math.round(a.paddleW),
+      balls: a.balls.map((b) => ({ x: Math.round(b.x), y: Math.round(b.y) })),
+      score: a.score,
+      lives: a.lives,
+      xpLevel: a.xpLevel,
+      combo: a.combo,
+      energy: Math.round(a.energy),
+      n: ++mirrorSeq,
+      clock: Math.max(0, Math.round(clock)),
+    };
+  }
+
+  function onSnapshot(seat: number, snap: RaceSnapshot): void {
+    if (seat !== turnSeat) return;
+    // Out-of-order packets are dropped rather than rewound: a frame of the
+    // past is worse than a frame of nothing when you are aiming a card.
+    if (mirror && snap.n <= mirror.n) return;
+    if (!snap.cells && mirror?.cells) snap.cells = mirror.cells;
+    mirror = snap;
+    mirrorAge = 0;
+    clock = snap.clock;
+  }
+
+  /** A waiting player pressed one of their three keys. Online the card is not
+   *  played here — it is sent, and every client (including this one) plays it
+   *  when the referee echoes it back, so nobody's table runs ahead. */
   function playCard(from: RacePlayer, slot: number): void {
-    if (!arena || phase !== 'play' || from.seat === turnSeat) return;
+    if (phase !== 'play' && phase !== 'watch') return;
+    if (from.seat === turnSeat) return;
     const id = from.stock[slot];
     if (!id) return;
     const def = CARDS[id];
     const target = active();
 
     if (!cardAllowed(def, from, target)) {
-      note(`${from.name}: пакт не позволяет`, '#5a6472');
+      note(`${from.name}: союзника не бьём`, '#5a6472');
       return;
     }
 
+    if (online) {
+      netio?.throwCard(from.seat, id);
+      return;
+    }
     from.stock.splice(slot, 1);
 
     // The counter costs the thrower the card anyway — that is what makes
     // baiting the block worth doing.
-    if (shieldArmed && def.kind === 'debuff') {
+    if (shieldArmed && def.kind === 'debuff' && def.effect.t !== 'dice') {
       shieldArmed = false;
       note(`${target.name} отбил ${def.name}`, '#4de2ff');
       fx.text(ARENA_W / 2, 250, 'ОТБИТО', '#4de2ff');
@@ -483,35 +628,63 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     applyCard(def, from, target);
   }
 
+  /** The referee's echo of a throw. Runs on every client so that stocks and
+   *  dice modifiers stay identical; only the machine that owns the arena
+   *  touches the field. */
+  function onCard(fromSeat: number, id: CardId): void {
+    const from = players[fromSeat];
+    const def = CARDS[id];
+    if (!from || !def) return;
+    const slot = from.stock.indexOf(id);
+    if (slot >= 0) from.stock.splice(slot, 1);
+
+    const target = active();
+    // The shield stops what is aimed at the field. A dice card is paperwork,
+    // not an attack, so it is never blocked — and every client can therefore
+    // apply it without knowing whether a shield was up.
+    if (arena && shieldArmed && def.kind === 'debuff' && def.effect.t !== 'dice') {
+      shieldArmed = false;
+      note(`${target.name} отбил ${def.name}`, '#4de2ff');
+      fx.text(ARENA_W / 2, 250, 'ОТБИТО', '#4de2ff');
+      sfx.play('ui');
+      return;
+    }
+    applyCard(def, from, target);
+  }
+
   function applyCard(def: CardDef, from: RacePlayer, target: RacePlayer): void {
-    if (!arena) return;
     switch (def.effect.t) {
       case 'powerup':
-        arena.grantPowerup(def.effect.id);
+        arena?.grantPowerup(def.effect.id);
         break;
       case 'debuff':
-        arena.applyDebuff(def.effect.id);
+        arena?.applyDebuff(def.effect.id);
         break;
       case 'ball':
-        if (arena.balls.length === 0) arena.addBall();
-        arena.setBallType(def.effect.id);
+        if (arena) {
+          if (arena.balls.length === 0) arena.addBall();
+          arena.setBallType(def.effect.id);
+        }
         break;
       case 'dice':
+        // State, not simulation: this one lands on every client.
         target.diceMod += def.effect.delta;
         break;
       case 'clock':
-        clock = Math.max(1, clock + def.effect.delta);
-        clockLimit = Math.max(clockLimit, clock);
+        if (arena) {
+          clock = Math.max(1, clock + def.effect.delta);
+          clockLimit = Math.max(clockLimit, clock);
+        }
         break;
     }
-    fx.text(ARENA_W / 2, def.kind === 'buff' ? 220 : 260, `${def.icon} ${def.name.toUpperCase()}`, def.color);
+    if (arena) fx.text(ARENA_W / 2, def.kind === 'buff' ? 220 : 260, `${def.icon} ${def.name.toUpperCase()}`, def.color);
     note(`${from.name} → ${def.name}`, def.color);
     sfx.play(def.kind === 'buff' ? 'powerup' : 'garbage');
   }
 
   function interventionKeys(): void {
     for (const p of players) {
-      if (p.seat === turnSeat) continue;
+      if (p.seat === turnSeat || !isMine(p.seat)) continue;
       const keys = SEAT_KEYS[p.seat] ?? [];
       for (let i = 0; i < HAND_SIZE; i++) {
         if (keys[i] && app.input.wasPressed([keys[i]])) playCard(p, i);
@@ -539,33 +712,104 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       bricks: arena.bricksBroken,
       boss: arena.level.boss !== undefined && arena.level.boss !== null,
     };
-    p.turns++;
-    if (cleared) p.cleared++;
-    standingsBefore = snapshot(players);
-
-    const earned = giveCards(p, cardsForTurn(result), rng);
-    if (earned > 0) note(`+${earned} карт за зачистку`, '#ffd24d');
-    if (cleared) for (const mate of teammates(players, p)) giveCards(mate, ALLY_CARDS, rng);
     app.saveProfile((prof) => (prof.totalXp += Math.round(arena!.xpEarned)));
 
-    if (isFinale(p)) return finishFinale(p, result);
+    // Cards are drawn here, on the machine that earned them, and travel as ids
+    // — the capsules caught this turn plus the clear bonus and the allies' cut.
+    const awards: TurnAward[] = [];
+    const clearCards = Array.from({ length: cardsForTurn(result) }, () => drawLocalCard());
+    const own = [...earned, ...clearCards];
+    earned = [];
+    if (own.length) awards.push({ seat: p.seat, cards: own });
+    if (cleared) {
+      for (const mate of teammates(players, p)) {
+        awards.push({ seat: mate.seat, cards: Array.from({ length: ALLY_CARDS }, () => drawLocalCard()) });
+      }
+    }
 
-    // Death costs the whole move: no die, no step, straight to the next player.
-    if (died) {
+    const report: TurnReport = { ...result, awards };
+    if (online) {
+      // The referee owns the die; the turn resumes when it answers.
+      netio?.reportResult(report);
+      return;
+    }
+    applyReport(report);
+    beginRoll(rollDice(rng, result, p.diceMod).die, report);
+  }
+
+  function drawLocalCard(): CardId {
+    return drawCard(localRng);
+  }
+
+  /** Hands out the cards a turn paid. Runs on every client from the same list. */
+  function applyReport(report: TurnReport): void {
+    standingsBefore = snapshot(players);
+    for (const award of report.awards ?? []) {
+      const who = players[award.seat];
+      if (!who) continue;
+      for (const card of award.cards) {
+        if (who.stock.length < STOCK_MAX) who.stock.push(card);
+      }
+      if (award.cards.length && who === active()) note(`+${award.cards.length} карт за ход`, '#ffd24d');
+    }
+  }
+
+  /** Everything from the die onwards: the same on the player's screen and on
+   *  every watcher's, because both are handed the same die and result. */
+  function beginRoll(die: number, report: TurnResult | null): void {
+    const p = active();
+    if (!report || report.died || die <= 0) {
       roll = null;
+      p.diceMod = 0;
       showRoll();
       return;
     }
-    roll = rollDice(rng, result, p.diceMod);
+    if (isFinale(p)) {
+      finishFinale(p, report);
+      return;
+    }
+    roll = makeRoll(die, turnRng(), report, p.diceMod);
     p.diceMod = 0;
     showRoll();
+  }
+
+  function onRoll(seat: number, index: number, die: number, report: TurnReport | null): void {
+    turnSeat = seat;
+    turnIndex = index;
+    if (report) {
+      const p = players[seat];
+      p.turns++;
+      if (report.cleared) p.cleared++;
+      applyReport(report);
+    }
+    beginRoll(die, report);
+  }
+
+  function onTurn(seat: number, index: number): void {
+    arena = null;
+    mirror = null;
+    roll = null;
+    moveResolved = false;
+    turnReversed = false;
+    turnSeat = seat;
+    turnIndex = index;
+    music.setScene('menu');
+    showBoard();
+  }
+
+  /** The referee burnt somebody's turn: they went quiet or lost the socket. */
+  function onTimeout(seat: number): void {
+    const p = players[seat];
+    if (p) note(`${p.name}: ход сгорел — нет связи`, '#ff4d6d');
+    feed.unshift(`${p?.name ?? 'Игрок'} пропускает ход: связь потеряна`);
+    if (feed.length > 5) feed.pop();
   }
 
   function finishFinale(p: RacePlayer, result: TurnResult): void {
     if (result.cleared) {
       phase = 'over';
       sfx.play('levelup');
-      app.saveProfile((prof) => (prof.versusWins[0] += 1));
+      if (isMine(p.seat)) app.saveProfile((prof) => (prof.versusWins[0] += 1));
       showOver(p);
       return;
     }
@@ -632,8 +876,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       const wasRevealed = cell.revealed;
       cell.revealed = true;
       const before = p.cell;
-      const outcome = resolveCell(cell.kind, p, players, distance, rng);
-      if (outcome.reversed) direction = direction === 1 ? -1 : 1;
+      const outcome = resolveCell(cell.kind, p, players, distance, turnRng());
+      if (outcome.reversed) {
+        direction = direction === 1 ? -1 : 1;
+        turnReversed = true;
+      }
       refreshCell(before);
       for (const other of players) refreshCell(other.cell);
       const def = CELL_TYPES[cell.kind];
@@ -670,12 +917,29 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     const leader = [...players].sort((a, b) => b.cell - a.cell)[0];
     const actions = app.overlay.querySelector('#move-actions');
     if (!actions || actions.childElementCount) return;
-    actions.append(
-      button('Следующий игрок', nextTurn, 'btn primary'),
-      button('В меню', () => app.setScene(mainMenu), 'btn ghost'),
-    );
+    if (!online) {
+      actions.append(button('Следующий игрок', nextTurn, 'btn primary'), button('В меню', leaveRace, 'btn ghost'));
+    } else if (isMine(turnSeat)) {
+      // Only the player whose turn it was hands it on; everyone else waits for
+      // the referee to say who is next.
+      actions.append(
+        button(
+          'Передать ход',
+          () => {
+            netio?.endTurn(turnReversed);
+            actions.replaceChildren(el('span', { class: 'hint' }, 'Передаём ход…'));
+          },
+          'btn primary',
+        ),
+        button('В меню', leaveRace, 'btn ghost'),
+      );
+    } else {
+      actions.append(el('span', { class: 'hint' }, `Ждём ${p.name}…`), button('В меню', leaveRace, 'btn ghost'));
+    }
 
-    const said = raceComments(standingsBefore, players, p, distance, rng);
+    // The commentator draws from the turn's own stream, so every screen hears
+    // the same line rather than three different ones.
+    const said = raceComments(standingsBefore, players, p, distance, turnRng());
     for (const line of said) {
       feed.unshift(line);
       if (feed.length > 5) feed.pop();
@@ -695,6 +959,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       ),
     );
     if (said.length) sfx.play('ui');
+  }
+
+  function leaveRace(): void {
+    netio?.dispose();
+    app.setScene(mainMenu);
   }
 
   function nextTurn(): void {
@@ -872,6 +1141,113 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     ctx.restore();
   }
 
+  /** The active player's field as it reaches us. Balls are drawn where they
+   *  would be now, not where the last packet put them: a card is aimed at a
+   *  moving ball, and a seventieth of a second of lag is a visible miss. */
+  function drawMirror(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    ctx.fillStyle = '#0a0f1f';
+    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+    ctx.fillStyle = '#16203c';
+    ctx.fillRect(0, 0, WALL, ARENA_H);
+    ctx.fillRect(ARENA_W - WALL, 0, WALL, ARENA_H);
+    ctx.fillRect(0, 0, ARENA_W, WALL);
+
+    if (!mirror) {
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = `600 14px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`Ждём поле: ${active().name}…`, ARENA_W / 2, ARENA_H / 2);
+      ctx.restore();
+      return;
+    }
+
+    const bw = brickWidthFor(ARENA_W, mirror.cols);
+    const cells = mirror.cells ?? '';
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < mirror.cols; c++) {
+        const ch = cells[r * mirror.cols + c];
+        if (!ch || !isBrickCode(ch)) continue;
+        const kind = BRICK_KINDS[ch];
+        ctx.fillStyle = kind.color;
+        ctx.globalAlpha = 0.62;
+        ctx.beginPath();
+        ctx.roundRect(GRID_LEFT + c * bw + 1.5, GRID_TOP + r * BRICK_H + 1.5, bw - 3, BRICK_H - 3, 3);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = active().accent;
+    ctx.fillRect(mirror.paddleX - mirror.paddleW / 2, PADDLE_Y, mirror.paddleW, PADDLE_H);
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 12;
+    for (const b of mirror.balls) {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    // Honesty about lag: a watcher can see how old the picture they are aiming
+    // at is, instead of guessing why a card missed.
+    const ms = Math.round(mirrorAge * 1000);
+    ctx.textAlign = 'right';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillStyle = ms > 400 ? '#ff4d6d' : 'rgba(255,255,255,0.35)';
+    ctx.fillText(`картинка: ${ms} мс`, ARENA_W - 12, ARENA_H - 12);
+    ctx.restore();
+  }
+
+  /** A watcher's right-hand panel: the same numbers the player has, taken from
+   *  the snapshot rather than from an arena we do not run. */
+  function drawWatchHud(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const p = active();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(10,15,32,0.85)';
+    ctx.strokeStyle = `${p.accent}59`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    const pad = 14;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = p.accent;
+    ctx.font = `800 16px ${FONT}`;
+    ctx.fillText('ТРАНСЛЯЦИЯ', pad, 26);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText(`${p.name} · клетка ${p.cell}/${distance} · круг ${round}`, pad, 44);
+
+    const low = clock <= 15;
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('ДО КОНЦА ХОДА', pad, 74);
+    ctx.fillStyle = low ? '#ff4d6d' : '#3ddc84';
+    ctx.font = `800 26px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(String(Math.ceil(Math.max(0, clock))), w - pad, 82);
+    ctx.textAlign = 'left';
+
+    if (mirror) {
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = `600 11px ${FONT}`;
+      ctx.fillText(`Жизни: ${mirror.lives}`, pad, 112);
+      ctx.fillText(`Счёт: ${mirror.score}`, pad, 130);
+      ctx.fillText(`Серия: ×${mirror.combo}`, pad, 148);
+      ctx.fillText(`Мячей в игре: ${mirror.balls.length}`, pad, 166);
+    }
+
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText('Ваши карты — слева,', pad, h - 46);
+    ctx.fillText('на ваших клавишах.', pad, h - 30);
+    ctx.restore();
+  }
+
   /** The die, drawn big in the middle of the screen. */
   function drawDie(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, face: number, wobble: number): void {
     ctx.save();
@@ -931,7 +1307,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       ctx.fillText('Ход сгорел — кубик не бросается', cx, h * 0.54);
       ctx.fillStyle = 'rgba(255,255,255,0.45)';
       ctx.font = `600 ${14 * s}px ${FONT}`;
-      ctx.fillText('Пробел или клик — дальше', cx, h * 0.72);
+      ctx.fillText(online ? 'Идём дальше…' : 'Пробел или клик — дальше', cx, h * 0.72);
       ctx.restore();
       return;
     }
@@ -962,7 +1338,7 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     ctx.fillText(`ХОД НА ${roll.total}`, cx, by + 58 * s);
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = `600 ${14 * s}px ${FONT}`;
-    ctx.fillText('Пробел или клик — шагаем', cx, by + 92 * s);
+    ctx.fillText(online ? 'Шагаем…' : 'Пробел или клик — шагаем', cx, by + 92 * s);
     ctx.restore();
   }
 
@@ -988,6 +1364,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         if (rollT < ROLL_SPIN) {
           // Cheap tumble: a new face every other frame, no physics.
           if (Math.floor(rollT * 18) !== Math.floor((rollT - dt) * 18)) rollFace = rng.int(1, 7);
+        } else if (online) {
+          // Online the screens move together on their own: making five people
+          // each press a key to see the same die would only add five delays.
+          if (rollT > ROLL_SPIN + 1.8) advanceFromRoll();
         } else if (app.input.anyPressed() || app.input.clicked) {
           advanceFromRoll();
         }
@@ -996,6 +1376,17 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
 
       if (phase === 'move') {
         stepMove(dt);
+        return;
+      }
+
+      if (phase === 'watch') {
+        mirrorAge += dt;
+        // The clock keeps running between packets so the countdown does not
+        // stutter; each snapshot corrects it.
+        clock = Math.max(0, clock - dt);
+        fx.update(dt);
+        interventionKeys();
+        if (app.input.wasPressed(['Escape'])) leaveRace();
         return;
       }
 
@@ -1041,6 +1432,19 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       // The draft freezes the clock: choosing a perk must not cost the turn.
       if (arena.state !== 'levelup' && arena.state !== 'spec') clock -= dt * speed;
 
+      // Publish the field for the watchers.
+      if (online && isMine(turnSeat)) {
+        snapTimer -= dt;
+        cellsTimer -= dt;
+        if (snapTimer <= 0) {
+          snapTimer = RACE_SNAPSHOT_INTERVAL;
+          const withCells = cellsTimer <= 0 || arena.bricksBroken !== lastBroken;
+          if (cellsTimer <= 0) cellsTimer = RACE_CELLS_INTERVAL;
+          lastBroken = arena.bricksBroken;
+          netio?.sendSnapshot(makeSnapshot(arena, withCells));
+        }
+      }
+
       if (arena.state === 'cleared') endTurn(true, false);
       else if (arena.state === 'dead') endTurn(false, true);
       else if (clock <= 0) endTurn(false, false);
@@ -1051,6 +1455,22 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
         drawRollScreen(ctx, w, h);
         return;
       }
+      if (phase === 'watch') {
+        ctx.save();
+        layout = fitBox(ctx, w, h, SCENE_W, SCENE_H);
+        drawPanel(ctx, 0, 0, PANEL_W, SCENE_H);
+        ctx.save();
+        ctx.translate(PANEL_W + GAP, 0);
+        ctx.beginPath();
+        ctx.rect(0, 0, ARENA_W, ARENA_H);
+        ctx.clip();
+        drawMirror(ctx);
+        ctx.restore();
+        drawWatchHud(ctx, PANEL_W + GAP + ARENA_W + GAP, 0, HUD_W, SCENE_H);
+        ctx.restore();
+        return;
+      }
+
       if (phase !== 'play' || !arena) {
         backdrop.draw(ctx, w, h);
         return;

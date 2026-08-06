@@ -143,7 +143,11 @@ const RACE_TURN_TIMEOUT_MS = 180_000;
 function raceOf(room) {
   let race = races.get(room);
   if (!race) {
-    race = { started: false, seed: 0, distance: 50, dir: 1, turn: 0, index: 0, seats: [], deadline: 0 };
+    // `log` is what lets a reloaded browser catch up: every turn is a die, a
+    // level result and a reverse flag, and replaying that list through the same
+    // deterministic rules rebuilds the whole race. The server still stores no
+    // game state of its own.
+    race = { started: false, seed: 0, distance: 50, dir: 1, turn: 0, index: 0, seats: [], deadline: 0, log: [], pending: null };
     races.set(room, race);
   }
   return race;
@@ -156,10 +160,12 @@ function raceSeats(race) {
 function announceLobby(room) {
   const race = raceOf(room);
   if (race.started) return;
-  const members = [...(rooms.get(room) ?? [])];
+  // The host is whoever took the first seat, not whoever opened the page
+  // first: a spectator who happened to connect early should not be holding the
+  // start button while the players wait.
   broadcast(room, {
     type: 'race',
-    msg: { k: 'lobby', seats: raceSeats(race), hostId: members[0]?.peerId ?? '', distance: race.distance },
+    msg: { k: 'lobby', seats: raceSeats(race), hostId: race.seats[0]?.owner ?? '', distance: race.distance },
   });
 }
 
@@ -180,6 +186,8 @@ setInterval(() => {
   for (const [room, race] of races) {
     if (!race.started || !race.deadline || now < race.deadline) continue;
     const seat = race.turn;
+    race.log.push({ index: race.index, seat, die: 0, result: null, reversed: false });
+    race.pending = null;
     broadcast(room, { type: 'race', msg: { k: 'timeout', seat } });
     advanceTurn(room, race);
   }
@@ -217,6 +225,8 @@ function handleRace(ws, msg) {
 
     case 'start': {
       if (race.started || race.seats.length < 2) return;
+      // Only somebody actually sitting at the table may start it.
+      if (!race.seats.some((s) => s.owner === ws.peerId)) return;
       // The roster is frozen here, as agreed: latecomers watch.
       race.started = true;
       race.seed = (Math.random() * 0xffffffff) >>> 0;
@@ -238,6 +248,7 @@ function handleRace(ws, msg) {
       const seat = race.seats[race.turn];
       if (!race.started || !seat || seat.owner !== ws.peerId) return;
       const die = 1 + Math.floor(Math.random() * 6);
+      race.pending = { index: race.index, seat: race.turn, die, result: m.result ?? null };
       broadcast(room, {
         type: 'race',
         msg: { k: 'roll', seat: race.turn, index: race.index, die, result: m.result ?? null },
@@ -248,8 +259,29 @@ function handleRace(ws, msg) {
     case 'turnEnd': {
       const seat = race.seats[race.turn];
       if (!race.started || !seat || seat.owner !== ws.peerId) return;
+      if (race.pending) {
+        race.log.push({ ...race.pending, reversed: !!m.reversed });
+        race.pending = null;
+      }
       if (m.reversed) race.dir = -race.dir;
       advanceTurn(room, race);
+      break;
+    }
+
+    case 'resume': {
+      if (!race.started) return;
+      send(ws, {
+        type: 'race',
+        msg: {
+          k: 'resume',
+          seed: race.seed,
+          distance: race.distance,
+          seats: raceSeats(race),
+          log: race.log,
+          turn: race.turn,
+          index: race.index,
+        },
+      });
       break;
     }
 
@@ -371,6 +403,8 @@ wss.on('connection', (ws) => {
     } else if (race && race.started && race.seats[race.turn]?.owner === ws.peerId) {
       // Mid-race the seats stay — the player may come back — but the turn they
       // were in the middle of does not wait for them.
+      race.log.push({ index: race.index, seat: race.turn, die: 0, result: null, reversed: false });
+      race.pending = null;
       broadcast(room, { type: 'race', msg: { k: 'timeout', seat: race.turn } });
       advanceTurn(room, race);
     }
