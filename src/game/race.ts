@@ -190,9 +190,18 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   let turnReversed = false;
   /** Whether it handed the turn back to whoever played before this one. */
   let turnRewind = false;
-  /** The active player's field as last seen by a watcher. */
+  /** The active player's field as it reaches a watcher.
+   *
+   *  Two snapshots are kept, not one. Drawing the newest one as it arrives
+   *  means the ball teleports fourteen times a second — which reads as lag even
+   *  though nothing is late. Playing back one interval behind and interpolating
+   *  between the pair makes the motion continuous, and costs only the interval
+   *  itself in delay. */
+  let mirrorPrev: RaceSnapshot | null = null;
   let mirror: RaceSnapshot | null = null;
+  /** Seconds since the newest snapshot arrived, and the gap it arrived after. */
   let mirrorAge = 0;
+  let mirrorGap = RACE_SNAPSHOT_INTERVAL;
   let mirrorSeq = -1;
   let snapTimer = 0;
   let cellsTimer = 0;
@@ -614,6 +623,14 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       note(`Долг катапульты: ${def.name}`, def.color);
     }
 
+    if (online && isMine(turnSeat)) {
+      // Watchers should see the field the moment the turn starts, not after
+      // the first interval.
+      snapTimer = 0;
+      cellsTimer = 0;
+      lastCells = '';
+      mirrorSeq = -1;
+    }
     phase = 'play';
     app.overlay.replaceChildren();
     app.overlay.classList.remove('interactive');
@@ -627,8 +644,10 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
   function startWatch(): void {
     phase = 'watch';
     arena = null;
+    mirrorPrev = null;
     mirror = null;
     mirrorAge = 0;
+    mirrorGap = RACE_SNAPSHOT_INTERVAL;
     mirrorSeq = -1;
     log.length = 0;
     app.overlay.replaceChildren();
@@ -673,6 +692,11 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     // past is worse than a frame of nothing when you are aiming a card.
     if (mirror && snap.n <= mirror.n) return;
     if (!snap.cells && mirror?.cells) snap.cells = mirror.cells;
+    // How long this one took to arrive is how long we have to play it back
+    // over: a slower sender simply stretches the interpolation rather than
+    // stuttering.
+    if (mirror) mirrorGap = Math.min(0.5, Math.max(0.02, mirrorAge));
+    mirrorPrev = mirror;
     mirror = snap;
     mirrorAge = 0;
     clock = snap.clock;
@@ -1295,6 +1319,12 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
       return;
     }
 
+    // Where playback is between the two snapshots we hold. Rendering trails the
+    // newest one by a gap, which is what buys smooth motion.
+    const a = Math.max(0, Math.min(1, mirrorAge / mirrorGap));
+    const from = mirrorPrev ?? mirror;
+    const lerp = (x: number, y: number): number => x + (y - x) * a;
+
     const bw = brickWidthFor(ARENA_W, mirror.cols);
     const cells = mirror.cells ?? '';
     for (let r = 0; r < ROWS; r++) {
@@ -1311,14 +1341,23 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     }
     ctx.globalAlpha = 1;
 
+    const paddleX = lerp(from.paddleX, mirror.paddleX);
+    const paddleW = lerp(from.paddleW, mirror.paddleW);
     ctx.fillStyle = active().accent;
-    ctx.fillRect(mirror.paddleX - mirror.paddleW / 2, PADDLE_Y, mirror.paddleW, PADDLE_H);
+    ctx.fillRect(paddleX - paddleW / 2, PADDLE_Y, paddleW, PADDLE_H);
+
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = '#ffffff';
     ctx.shadowBlur = 12;
-    for (const b of mirror.balls) {
+    for (let i = 0; i < mirror.balls.length; i++) {
+      const to = mirror.balls[i];
+      const was = from.balls[i];
+      // A ball that was not there a moment ago has nothing to interpolate from;
+      // it simply appears where it is.
+      const x = was ? lerp(was.x, to.x) : to.x;
+      const y = was ? lerp(was.y, to.y) : to.y;
       ctx.beginPath();
-      ctx.arc(b.x, b.y, 6, 0, Math.PI * 2);
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
@@ -1326,10 +1365,18 @@ export function raceScene(app: App, opts: RaceOptions): Scene {
     // Honesty about lag: a watcher can see how old the picture they are aiming
     // at is, instead of guessing why a card missed.
     const ms = Math.round(mirrorAge * 1000);
+    const rate = Math.round(1 / Math.max(0.02, mirrorGap));
     ctx.textAlign = 'right';
     ctx.font = `600 11px ${FONT}`;
     ctx.fillStyle = ms > 400 ? '#ff4d6d' : 'rgba(255,255,255,0.35)';
-    ctx.fillText(`картинка: ${ms} мс`, ARENA_W - 12, ARENA_H - 12);
+    ctx.fillText(`картинка: ${ms} мс · ${rate} кадров/с`, ARENA_W - 12, ARENA_H - 12);
+    if (ms > 500) {
+      // Almost always this, and it is not the network: a browser freezes the
+      // frame loop of a tab nobody is looking at, so the player's simulation
+      // stops and there is nothing to send.
+      ctx.fillStyle = '#ff4d6d';
+      ctx.fillText('окно игрока не в фокусе?', ARENA_W - 12, ARENA_H - 26);
+    }
     ctx.restore();
   }
 

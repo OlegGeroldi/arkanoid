@@ -69,10 +69,12 @@ export interface RaceSnapshot extends Omit<FieldSnapshot, 'cells'> {
   clock: number;
 }
 
-/** Snapshots per second for the race feed. Denser than the 1-on-1 mode's 0.12:
- *  a card is aimed at what the watcher sees, so a stale field is a missed throw
- *  rather than a cosmetic hiccup. Only the small packet travels this often. */
-export const RACE_SNAPSHOT_INTERVAL = 0.07;
+/** Twenty a second. Denser than the 1-on-1 mode's 0.12 because a card is aimed
+ *  at what the watcher sees, and because the watcher plays the feed back one
+ *  interval behind to interpolate it — the shorter the interval, the smaller
+ *  that delay. Only the ~60-byte packet travels this often; the brick wall
+ *  still goes only when it changes. */
+export const RACE_SNAPSHOT_INTERVAL = 0.05;
 /** How often the brick wall is re-sent even when nothing appears to have
  *  changed, as a safety net for a watcher that joined mid-turn. */
 export const RACE_CELLS_INTERVAL = 1.5;
