@@ -10,7 +10,7 @@ import {
 } from './core/storage';
 import { sfx } from './audio/sfx';
 import { music } from './audio/music';
-import { CAMPAIGN_LEVELS } from './core/campaignLevels';
+import { CAMPAIGN_LEVELS, RACE_LEVELS } from './core/campaignLevels';
 import { net } from './net/client';
 import { hall } from './core/hall';
 import type { LevelData } from './core/level';
@@ -169,6 +169,13 @@ export class App {
       this.campaignCacheCycle = cycle;
     }
     return this.campaignCache;
+  }
+
+  /** The race's own hundred: the same track, drawn with the other picture set.
+   *  Admin edits are deliberately not applied here — they are keyed by campaign
+   *  index and belong to the campaign. */
+  raceLevels(): LevelData[] {
+    return RACE_LEVELS;
   }
 
   switchProfile(id: string): void {

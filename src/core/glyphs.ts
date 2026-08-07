@@ -28,6 +28,9 @@ export interface Glyph {
   /** True when the shape reads the same in both directions, which lets the
    *  whole field be mirrored around it. Words never can be. */
   mirror?: boolean;
+  /** Drawn in single-cell strokes rather than solid mass — runes and letters.
+   *  These need more empty space around them or the filler swallows them. */
+  thin?: boolean;
   /** What the shape is about, shown in the level's name. */
   idea: string;
 }
@@ -203,6 +206,166 @@ export const GLYPHS: Glyph[] = [
   },
 ];
 
+// ------------------------------------------------------------------- runes --
+
+/** Elder Futhark, five columns by seven — two of them side by side with a gap
+ *  fill the field exactly. A pair reads as an inscription rather than a
+ *  picture, which is what the campaign wanted and the race did not: smileys
+ *  belong at a table, runes belong on a wall.
+ *
+ *  Their materials follow their meaning rather than their looks. Ice is steel,
+ *  hail is explosive, need regenerates, wealth is gold. */
+export interface Rune {
+  name: string;
+  meaning: string;
+  art: string[];
+  skin: GlyphSkin;
+}
+
+export const RUNES: Rune[] = [
+  {
+    name: 'Феху',
+    meaning: 'скот, богатство',
+    skin: { body: 'n', core: 'g', charge: 'e' },
+    art: ['#...#', '#..#.', '#.#.#', '##.#.', '#.#..', '#....', '#....'],
+  },
+  {
+    name: 'Уруз',
+    meaning: 'тур, дикая сила',
+    skin: { body: 't', core: 's', charge: 'e' },
+    art: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '#...#'],
+  },
+  {
+    name: 'Турисаз',
+    meaning: 'шип, великан',
+    skin: { body: 's', core: 'e', charge: 'e' },
+    art: ['#....', '##...', '#@#..', '#@#..', '##...', '#....', '#....'],
+  },
+  {
+    name: 'Ансуз',
+    meaning: 'бог, слово',
+    skin: { body: 'n', core: 'g', charge: 'e' },
+    art: ['#..#.', '#.#..', '##...', '#..#.', '#.#..', '##...', '#....'],
+  },
+  {
+    name: 'Райдо',
+    meaning: 'дорога, путь',
+    skin: { body: 't', core: 'n', charge: 'e' },
+    art: ['###..', '#..#.', '#..#.', '###..', '#.#..', '#..#.', '#...#'],
+  },
+  {
+    name: 'Кеназ',
+    meaning: 'факел',
+    skin: { body: 'n', core: 'e', charge: 'e' },
+    art: ['...#.', '..#..', '.#...', '@....', '.#...', '..#..', '...#.'],
+  },
+  {
+    name: 'Гебо',
+    meaning: 'дар',
+    skin: { body: 'g', core: 'g', charge: 'e' },
+    art: ['#...#', '.#.#.', '..@..', '.#.#.', '#...#', '.....', '.....'],
+  },
+  {
+    name: 'Вуньо',
+    meaning: 'радость',
+    skin: { body: 'n', core: 'p', charge: 'e' },
+    art: ['#.##.', '#@..#', '#.##.', '#....', '#....', '#....', '#....'],
+  },
+  {
+    name: 'Хагалаз',
+    meaning: 'град, разрушение',
+    skin: { body: 't', core: 'e', charge: 'e' },
+    art: ['#...#', '#...#', '#@@@#', '#...#', '#...#', '#...#', '#...#'],
+  },
+  {
+    name: 'Наутиз',
+    meaning: 'нужда',
+    skin: { body: 'n', core: 'r', charge: 'e' },
+    art: ['..#..', '..#..', '.@#..', '@@#..', '..#..', '..#..', '..#..'],
+  },
+  {
+    name: 'Иса',
+    meaning: 'лёд',
+    skin: { body: 's', core: 's', charge: 'e' },
+    art: ['..#..', '..#..', '..@..', '..#..', '..@..', '..#..', '..#..'],
+  },
+  {
+    name: 'Йера',
+    meaning: 'год, урожай',
+    skin: { body: 'n', core: 'g', charge: 'e' },
+    art: ['.##..', '#..#.', '.#.@.', '..#..', '.@.#.', '#..#.', '.##..'],
+  },
+  {
+    name: 'Соулу',
+    meaning: 'солнце',
+    skin: { body: 'g', core: 'e', charge: 'e' },
+    art: ['..##.', '.##..', '.#...', '..@..', '...#.', '..##.', '.##..'],
+  },
+  {
+    name: 'Тейваз',
+    meaning: 'победа',
+    skin: { body: 't', core: 'g', charge: 'e' },
+    art: ['..#..', '.###.', '##@##', '..#..', '..#..', '..#..', '..#..'],
+  },
+  {
+    name: 'Беркана',
+    meaning: 'берёза, рост',
+    skin: { body: 'n', core: 'r', charge: 'e' },
+    art: ['##...', '#@#..', '#@#..', '##...', '#@#..', '#@#..', '##...'],
+  },
+  {
+    name: 'Манназ',
+    meaning: 'человек',
+    skin: { body: 't', core: 'p', charge: 'e' },
+    art: ['#...#', '##.##', '#@#@#', '#...#', '#...#', '#...#', '#...#'],
+  },
+  {
+    name: 'Лагуз',
+    meaning: 'вода',
+    skin: { body: 'n', core: 's', charge: 'e' },
+    art: ['#.##.', '#@#..', '#....', '#....', '#....', '#....', '#....'],
+  },
+  {
+    name: 'Ингваз',
+    meaning: 'семя',
+    skin: { body: 'n', core: 'r', charge: 'e' },
+    art: ['..#..', '.#.#.', '#.@.#', '#...#', '#.@.#', '.#.#.', '..#..'],
+  },
+  {
+    name: 'Отала',
+    meaning: 'наследие',
+    skin: { body: 's', core: 'g', charge: 'e' },
+    art: ['..#..', '.#.#.', '#.@.#', '.#.#.', '..#..', '.#.#.', '#...#'],
+  },
+  {
+    name: 'Дагаз',
+    meaning: 'рассвет',
+    skin: { body: 'n', core: 'e', charge: 'e' },
+    art: ['#...#', '##.##', '#.@.#', '#.#.#', '#.@.#', '##.##', '#...#'],
+  },
+  {
+    name: 'Альгиз',
+    meaning: 'защита',
+    skin: { body: 's', core: 'x', charge: 'e' },
+    art: ['#.@.#', '.#@#.', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  },
+];
+
+/** Two runes with a gap between them: five plus two plus five is exactly the
+ *  width of the field. A pair is never a palindrome, so the level keeps its
+ *  scatter rather than being mirrored. */
+export function runeGlyph(a: Rune, b: Rune): Glyph {
+  const art = Array.from({ length: 7 }, (_, r) => `${a.art[r]}..${b.art[r]}`);
+  return {
+    name: `${a.name} · ${b.name}`,
+    idea: `${a.meaning} и ${b.meaning}`,
+    skin: a.skin,
+    mirror: false,
+    thin: true,
+    art,
+  };
+}
+
 // -------------------------------------------------------------------- font --
 
 /** Three by five, which is exactly what fits three letters across a twelve
@@ -264,6 +427,7 @@ export function wordGlyph(entry: (typeof WORDS)[number]): Glyph {
     idea: entry.idea,
     skin: entry.skin,
     mirror: false,
+    thin: true,
     art: art.map((row, i) => (i === 2 ? row.replace(/#/g, '@') : row)),
   };
 }

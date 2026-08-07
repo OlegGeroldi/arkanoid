@@ -3,7 +3,22 @@ import { EMPTY, type BrickCode } from './bricks';
 import { normalizeLevel, type LevelData } from './level';
 import { Rng } from './rng';
 import type { RouteDef } from './routes';
-import { GLYPHS, WORDS, wordGlyph, type Glyph } from './glyphs';
+import { GLYPHS, RUNES, WORDS, runeGlyph, wordGlyph, type Glyph } from './glyphs';
+
+/** Which set of pictures a level draws from. The campaign carves runes into its
+ *  walls; the race, played at a table with people shouting, gets smileys. */
+export type LevelTheme = 'signs' | 'runes';
+
+function pickGlyph(rng: Rng, theme: LevelTheme): Glyph {
+  if (theme === 'runes') {
+    const a = rng.pick(RUNES);
+    let b = rng.pick(RUNES);
+    // Two of the same rune reads as a stutter rather than an inscription.
+    if (b === a) b = RUNES[(RUNES.indexOf(a) + 1 + rng.int(0, RUNES.length - 1)) % RUNES.length];
+    return runeGlyph(a, b);
+  }
+  return rng.chance(0.35) ? wordGlyph(rng.pick(WORDS)) : rng.pick(GLYPHS);
+}
 
 /** Difficulty knobs derived from the campaign position, 0 (easy) to 1 (brutal). */
 interface Recipe {
@@ -128,9 +143,12 @@ function stampGlyph(grid: string[][], glyph: Glyph, r: Recipe, rng: Rng): boolea
    *  kept out of there — inside a silhouette they turn a skull into gravel —
    *  but the corners of its box stay free, so the field can still be full. */
   const kept: boolean[][] = Array.from({ length: ROWS }, () => new Array(COLS).fill(false));
+  // Thin strokes need a wider margin: a rune drawn one cell wide disappears
+  // into a field of loose bricks, where a skull just looks busy.
+  const halo = glyph.thin ? 2 : 1;
   const protect = (row: number, col: number): void => {
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
+    for (let dr = -halo; dr <= halo; dr++) {
+      for (let dc = -halo; dc <= halo; dc++) {
         const rr = row + dr;
         const cc = col + dc;
         if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) kept[rr][cc] = true;
@@ -160,7 +178,9 @@ function stampGlyph(grid: string[][], glyph: Glyph, r: Recipe, rng: Rng): boolea
   for (let row = 0; row < r.rows; row++) {
     for (let col = 0; col < COLS; col++) {
       if (kept[row][col] || grid[row][col] !== EMPTY) continue;
-      if (rng.next() < r.density * 0.85) put(grid, col, row, rng.pick(r.palette));
+      // Outside the margin the field fills up as usual: the halo is what keeps
+      // a rune legible, so the rest of the level need not be empty to match.
+      if (rng.next() < r.density * (glyph.thin ? 0.72 : 0.85)) put(grid, col, row, rng.pick(r.palette));
     }
   }
   return kept;
@@ -333,7 +353,13 @@ const STAGE_NAMES = [
 
 /** Builds one campaign level. Deterministic: the same index always produces the
  *  same field, so progress and level select stay meaningful between sessions. */
-export function generateLevel(index: number, total: number, seed = 0x9e37, route?: RouteDef): LevelData {
+export function generateLevel(
+  index: number,
+  total: number,
+  seed = 0x9e37,
+  route?: RouteDef,
+  theme: LevelTheme = 'signs',
+): LevelData {
   const rng = new Rng((seed + index * 2654435761 + (route ? route.id.length * 7919 : 0)) >>> 0);
   const recipe = recipeFor(index, total, route);
   const grid = blank();
@@ -341,7 +367,7 @@ export function generateLevel(index: number, total: number, seed = 0x9e37, route
   // Two levels in five are a picture. They are the ones people remember, and
   // they still obey every safety pass below.
   const picture = index % 5 === 1 || index % 5 === 3;
-  const glyph = picture ? (rng.chance(0.35) ? wordGlyph(rng.pick(WORDS)) : rng.pick(GLYPHS)) : null;
+  const glyph = picture ? pickGlyph(rng, theme) : null;
   const kept = glyph ? stampGlyph(grid, glyph, recipe, rng) : undefined;
   if (!glyph) (recipe.chaos ? rng.pick(SHAPERS) : SHAPERS[index % SHAPERS.length])(rng, grid, recipe);
 
