@@ -38,9 +38,10 @@ import { BRICK_KINDS, type Brick, type BrickCode } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
 import { DEBUFFS, type DebuffId } from './debuffs';
 import { BOSSES, type BossDef, type BossId } from './bosses';
+import { LOCKS_FOR_MULTIBALL, LOCK_HOLD, makeProp, type Prop } from './props';
 import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
 import { MAX_RANK, SKILLS, SKILL_SLOTS, skillCooldown, skillDuration, type SkillId } from './skills';
-import { buildBricks, breakableCount, type LevelData } from './level';
+import { buildBricks, widenProps, breakableCount, type LevelData } from './level';
 import { POWERUP_LIST, POWERUPS, type FallingPowerup, type PowerupId } from './powerups';
 import { SUPERS, type SuperId } from './supers';
 import { baseStats, rollPerks, xpForLevel, XP_RATE, type Perk, type RunStats } from './progression';
@@ -97,6 +98,8 @@ export type ArenaEvent =
   | { t: 'bossHit'; x: number; y: number; color: string }
   | { t: 'bossPhase'; phase: 1 | 2 | 3 }
   | { t: 'bossGrab'; taken: boolean; x: number; y: number }
+  | { t: 'prop'; kind: Prop['kind']; x: number; y: number; score: number }
+  | { t: 'targetsDown'; x: number; y: number }
   | { t: 'bossShotHit'; x: number; y: number }
   | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
@@ -339,6 +342,11 @@ export class Arena {
   brittleWear = 0;
   boss: BossState | null = null;
   bossShots: BossShot[] = [];
+  /** The pinball attic: bumpers and friends living in the upper rows. */
+  props: Prop[] = [];
+  /** Balls swallowed by locks. Two of them and the next one comes back with
+   *  company — the oldest promise in pinball. */
+  locked = 0;
   /** Seconds until the boss can be hurt by an explosion again. */
   private blastCd = 0;
   /** Admin cheat: losing the ball costs nothing and it is served straight back. */
@@ -381,6 +389,8 @@ export class Arena {
     this.boss = level.boss ? this.spawnBoss(BOSSES[level.boss]) : null;
     this.bossShots = [];
     this.bricks = buildBricks(level, this.cols, this.brickW);
+    this.props = widenProps(level.props, this.cols).map((p) => makeProp(p, this.brickW));
+    this.locked = 0;
     this.grid = new Array(this.cols * ROWS).fill(null);
     for (const b of this.bricks) this.grid[b.row * this.cols + b.col] = b;
     this.remaining = breakableCount(level, this.cols);
@@ -534,6 +544,130 @@ export class Arena {
     this.shake = 1;
     this.flash = 0.6;
     this.events.push({ t: 'bossGrab', taken: true, x: target.x, y: target.y });
+  }
+
+  /** The attic. Everything here happens to a ball that is already in flight:
+   *  props never move and never fall, they only change where the ball goes and
+   *  what it pays on the way. */
+  private updateProps(dt: number): void {
+    for (const p of this.props) {
+      if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 3);
+      if (p.spinRate > 0) {
+        p.spin += p.spinRate * dt;
+        p.spinRate = Math.max(0, p.spinRate - dt * 6);
+      }
+      if (p.holdT > 0) {
+        p.holdT -= dt;
+        if (p.holdT <= 0) this.releaseLock(p);
+      }
+    }
+
+    for (const ball of this.balls) {
+      if (ball.held !== null || ball.captured) continue;
+      for (const p of this.props) {
+        if (p.down || p.holdT > 0) continue;
+        const dx = ball.x - p.x;
+        const dy = ball.y - p.y;
+        const reach = p.def.radius + ball.r;
+        if (dx * dx + dy * dy > reach * reach) continue;
+        this.hitProp(p, ball, dx, dy);
+      }
+    }
+  }
+
+  private hitProp(p: Prop, ball: Ball, dx: number, dy: number): void {
+    p.flash = 1;
+    const combo = 1 + Math.min(this.combo, COMBO_MAX) * 0.1;
+    const score = Math.round(p.def.score * combo);
+    this.score += score;
+    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * this.stats.energyMul);
+    this.events.push({ t: 'prop', kind: p.kind, x: p.x, y: p.y, score });
+
+    const dist = Math.hypot(dx, dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    switch (p.kind) {
+      case 'bumper': {
+        // Straight back out along the normal, faster than it came in. Capped,
+        // or a cluster of bumpers would launch the ball past playable speed.
+        ball.vx = nx;
+        ball.vy = ny;
+        setSpeed(ball, Math.min(ball.baseSpeed * 1.35, BALL_SPEED_MAX));
+        avoidShallow(ball);
+        ball.x = p.x + nx * (p.def.radius + ball.r + 1);
+        ball.y = p.y + ny * (p.def.radius + ball.r + 1);
+        this.shake = Math.min(1, this.shake + 0.18);
+        break;
+      }
+      case 'sling': {
+        // Sideways, away from the field's centre: a sling should throw the ball
+        // back into play rather than straight down.
+        const outward = p.x < this.width / 2 ? 1 : -1;
+        ball.vx = outward * 0.85 + nx * 0.4;
+        ball.vy = ny >= 0 ? 0.5 : -0.5;
+        setSpeed(ball, Math.min(ball.baseSpeed * 1.2, BALL_SPEED_MAX));
+        avoidShallow(ball);
+        ball.x = p.x + ball.vx * (p.def.radius + ball.r + 1);
+        ball.y = p.y + ball.vy * (p.def.radius + ball.r + 1);
+        break;
+      }
+      case 'spinner':
+        // Passes straight through: the pay is for the crossing, not a bounce.
+        p.spinRate = 14;
+        break;
+      case 'target':
+        p.down = true;
+        if (this.props.every((q) => q.kind !== 'target' || q.down)) {
+          // A full set is worth going out of your way for.
+          this.events.push({ t: 'targetsDown', x: p.x, y: p.y });
+          this.dropReward(p.x, p.y);
+        }
+        break;
+      case 'lock':
+        // Swallowed. It comes back on its own, and the second one buys company.
+        ball.captured = true;
+        ball.vx = 0;
+        ball.vy = 0;
+        ball.x = p.x;
+        ball.y = p.y;
+        p.holdT = LOCK_HOLD;
+        this.locked++;
+        break;
+    }
+  }
+
+  /** Spits a locked ball back into play, with company once enough have been
+   *  swallowed. */
+  private releaseLock(p: Prop): void {
+    const ball = this.balls.find((b) => b.captured && Math.abs(b.x - p.x) < 2 && Math.abs(b.y - p.y) < 2);
+    if (!ball) return;
+    ball.captured = false;
+    ball.vx = this.rng.range(-0.6, 0.6);
+    ball.vy = 1;
+    setSpeed(ball, ball.baseSpeed);
+    avoidShallow(ball);
+    if (this.locked >= LOCKS_FOR_MULTIBALL) {
+      this.locked = 0;
+      this.addBall();
+      this.addBall();
+      this.flash = 0.6;
+    }
+  }
+
+  /** What a full set of drop targets pays: a capsule, dropped where the last
+   *  one fell. */
+  private dropReward(x: number, y: number): void {
+    const pool = POWERUP_LIST.filter((d) => !d.bad && !d.pvpOnly && !d.raceOnly);
+    const def = this.rng.pick(pool);
+    this.powerups.push({
+      id: def.id,
+      def,
+      x: x - POWERUP_W / 2,
+      y,
+      vy: POWERUP_FALL,
+      spin: this.rng.range(0, 6.28),
+    });
   }
 
   private updateBossShots(dt: number): void {
@@ -700,6 +834,8 @@ export class Arena {
     }
 
     this.updateBalls(dt);
+    // After the balls have moved: the attic reacts to where they ended up.
+    this.updateProps(dt);
     this.updateLasers(dt);
     this.updatePowerups(dt);
     this.updateBricks(dt);

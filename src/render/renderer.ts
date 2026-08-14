@@ -69,6 +69,7 @@ export function drawArena(
 
   drawBackground(ctx, arena, t);
   drawBricks(ctx, arena);
+  drawProps(ctx, arena, t);
   drawBoss(ctx, arena, t);
   drawSuperVisuals(ctx, arena, t);
   drawPowerups(ctx, arena);
@@ -211,6 +212,104 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, 3);
       ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/** The pinball attic. Each piece has to read as what it does at a glance: a
+ *  bumper as something that will throw the ball back, a spinner as something to
+ *  shoot through, a dropped target as gone. */
+function drawProps(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void {
+  for (const p of arena.props) {
+    const { def } = p;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+
+    if (p.kind === 'target' && p.down) {
+      // Knocked down: a scar where it was, so the set can still be counted.
+      ctx.strokeStyle = withAlpha(def.color, 0.25);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-6, 0);
+      ctx.lineTo(6, 0);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
+    const glow = 0.55 + p.flash * 0.45;
+    ctx.shadowColor = def.color;
+    ctx.shadowBlur = 10 + p.flash * 22;
+
+    switch (p.kind) {
+      case 'bumper': {
+        ctx.fillStyle = withAlpha(def.color, 0.18 + p.flash * 0.5);
+        ctx.beginPath();
+        ctx.arc(0, 0, def.radius + p.flash * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.fillStyle = withAlpha('#ffffff', 0.5 + p.flash * 0.5);
+        ctx.beginPath();
+        ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'sling': {
+        // A wedge pointing away from the centre, which is where it throws.
+        const dir = p.x < arena.width / 2 ? 1 : -1;
+        ctx.fillStyle = withAlpha(def.color, 0.2 + p.flash * 0.5);
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-def.radius * dir, -def.radius);
+        ctx.lineTo(def.radius * dir, 0);
+        ctx.lineTo(-def.radius * dir, def.radius);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        break;
+      }
+      case 'spinner': {
+        ctx.rotate(p.spin);
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-def.radius, 0);
+        ctx.lineTo(def.radius, 0);
+        ctx.stroke();
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.arc(0, 0, def.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case 'target': {
+        ctx.fillStyle = withAlpha(def.color, 0.25 + p.flash * 0.5);
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-def.radius, -5, def.radius * 2, 10, 3);
+        ctx.fill();
+        ctx.stroke();
+        break;
+      }
+      case 'lock': {
+        // A hole, drawn as one: dark inside, ringed outside, and lit while it
+        // is holding something.
+        ctx.fillStyle = p.holdT > 0 ? withAlpha(def.color, 0.45) : 'rgba(4,7,16,0.9)';
+        ctx.beginPath();
+        ctx.arc(0, 0, def.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 4]);
+        ctx.lineDashOffset = -t * 12;
+        ctx.stroke();
+        break;
+      }
     }
     ctx.restore();
   }

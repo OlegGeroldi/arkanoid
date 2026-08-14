@@ -4,6 +4,7 @@ import { normalizeLevel, type LevelData } from './level';
 import { Rng } from './rng';
 import type { RouteDef } from './routes';
 import { GLYPHS, RUNES, WORDS, runeGlyph, wordGlyph, type Glyph } from './glyphs';
+import type { LevelProp, PropKind } from './props';
 
 /** Which set of pictures a level draws from. The campaign carves runes into its
  *  walls; the race, played at a table with people shouting, gets smileys. */
@@ -320,6 +321,54 @@ export function openRegeneratorPockets(grid: string[][], rows: number): void {
   }
 }
 
+/** Hangs pinball furniture in the top rows and clears the bricks it stands on.
+ *
+ *  The attic grows with the campaign: an early level gets a couple of bumpers,
+ *  a late one a whole cluster with a lock in it. Targets come in sets, because
+ *  a set is the only thing worth chasing. */
+function hangProps(rng: Rng, grid: string[][], index: number, total: number): LevelProp[] {
+  const t = Math.min(1, index / (total - 1));
+  const count = 2 + Math.round(rng.range(0, 2) + t * 3);
+  const props: LevelProp[] = [];
+  const taken = new Set<string>();
+
+  const pool: PropKind[] = ['bumper', 'bumper', 'sling', 'spinner'];
+  if (t > 0.25) pool.push('target', 'target');
+  if (t > 0.45) pool.push('lock', 'bumper');
+
+  for (let i = 0; i < count; i++) {
+    const kind = rng.pick(pool);
+    // Two rows at the top, and never against the side walls: a prop in the
+    // corner is a prop the ball reaches once.
+    const row = rng.int(0, 2);
+    const col = 1 + rng.int(0, COLS - 2);
+    const key = `${row},${col}`;
+    if (taken.has(key)) continue;
+    taken.add(key);
+    props.push({ kind, col, row });
+  }
+
+  // Targets are only interesting as a set; a lone one is a brick that pays
+  // more.
+  if (props.filter((p) => p.kind === 'target').length === 1) {
+    const one = props.find((p) => p.kind === 'target')!;
+    one.kind = 'bumper';
+  }
+
+  // The bricks underneath make way, along with their neighbours: a prop wedged
+  // between two bricks never gets hit.
+  for (const p of props) {
+    for (let dc = -1; dc <= 1; dc++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        const c = p.col + dc;
+        const r = p.row + dr;
+        if (c >= 0 && c < COLS && r >= 0 && r < ROWS) grid[r][c] = EMPTY;
+      }
+    }
+  }
+  return props;
+}
+
 const CHAOS_NAMES = [
   'Аномалия',
   'Разлом',
@@ -392,6 +441,10 @@ export function generateLevel(
   // never a palindrome, so those keep their scatter.
   if (!recipe.chaos && (!picture || glyph?.mirror)) symmetrise(grid, recipe.rows);
 
+  // The attic goes up after the field is settled and before the last safety
+  // pass, since it clears bricks of its own.
+  const props = index >= 10 ? hangProps(rng, grid, index, total) : [];
+
   // Truly last, because mirroring can seal a pocket that was open a moment ago,
   // and one asymmetric cell is a far smaller price than a level that cannot be
   // finished.
@@ -413,6 +466,7 @@ export function generateLevel(
       author: 'NEONOID',
       rows,
       ballSpeed: recipe.ballSpeed,
+      props,
     },
     `gen-${index + 1}`,
   );

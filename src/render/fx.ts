@@ -1,4 +1,5 @@
 import type { ArenaEvent } from '../core/arena';
+import { PROPS } from '../core/props';
 import { POWERUPS } from '../core/powerups';
 import { SUPERS } from '../core/supers';
 import { Rng } from '../core/rng';
@@ -79,6 +80,14 @@ export class ArenaFx {
         case 'bossPhase':
           this.text(240, 250, e.phase === 3 ? 'БОСС В ЯРОСТИ' : 'ЩИТ ПРОБИТ', '#ff4d6d');
           this.ring(240, 120, 300, '#ff4d6d');
+          break;
+        case 'prop':
+          this.ring(e.x, e.y, e.kind === 'bumper' ? 44 : 34, PROPS[e.kind].color);
+          if (e.score >= 40) this.text(e.x, e.y - 18, `+${e.score}`, PROPS[e.kind].color);
+          break;
+        case 'targetsDown':
+          this.text(240, 260, 'МИШЕНИ СБИТЫ', '#3ddc84');
+          this.ring(e.x, e.y, 120, '#3ddc84');
           break;
         case 'bossGrab':
           this.text(240, 300, e.taken ? 'МЯЧ ЗАХВАЧЕН' : 'МЯЧ ОТПУЩЕН', e.taken ? '#ff2d55' : '#ffd24d');
