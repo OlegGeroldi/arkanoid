@@ -20,6 +20,8 @@ const SCENE_H = ARENA_H;
 export interface PinballOptions {
   levels: LevelData[];
   startIndex?: number;
+  /** Balls per game; the campaign screen passes the profile's lives setting. */
+  balls?: number;
 }
 
 /** The table. Same bricks, same furniture, opposite physics — so it lives in
@@ -28,6 +30,7 @@ export function pinballScene(app: App, opts: PinballOptions): Scene {
   const levels = opts.levels.length ? opts.levels : [];
   let index = Math.min(Math.max(opts.startIndex ?? 0, 0), Math.max(levels.length - 1, 0));
   let table = new PinballTable(levels[index]);
+  if (opts.balls) table.ballsLeft = opts.balls;
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
   let panelOpen = false;
@@ -63,9 +66,11 @@ export function pinballScene(app: App, opts: PinballOptions): Scene {
 
   function nextTable(): void {
     index = (index + 1) % Math.max(1, levels.length);
-    const score = table.score;
+    const { score, ballsLeft } = table;
     table = new PinballTable(levels[index]);
     table.score = score;
+    // Balls carry between tables, which is what makes a run a run.
+    table.ballsLeft = ballsLeft;
     fx = new ArenaFx();
     panelOpen = false;
     app.overlay.replaceChildren();

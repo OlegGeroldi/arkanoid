@@ -458,6 +458,9 @@ export function mainMenu(app: App): Scene {
   function screenSolo(levels: LevelData[], title: string, opts: { campaign?: boolean; startIndex?: number } = {}): void {
     let chosen: SuperId = app.profile.favouriteSuper;
     if (!isSuperUnlocked(app.profile, chosen)) chosen = 'barrage';
+    /** Which physics these levels are played with. The same hundred fields work
+     *  either way; what changes is whether the ball falls. */
+    let field: 'paddle' | 'table' = 'paddle';
 
     const render = (): void => {
       renderSolo = render;
@@ -485,6 +488,37 @@ export function mainMenu(app: App): Scene {
                 `Внимание: новый забег перезапишет автосохранение (уровень ${app.profile.save.levelIndex + 1}). Чтобы вернуться к нему, выберите «Продолжить забег» в меню.`,
               )
             : null,
+          el('h3', { style: 'margin-top:18px' }, 'Поле'),
+          el(
+            'div',
+            { class: 'row', style: 'gap:6px' },
+            button(
+              '🎯 Ракетка',
+              () => {
+                field = 'paddle';
+                sfx.play('ui');
+                render();
+              },
+              `btn small${field === 'paddle' ? ' primary' : ''}`,
+            ),
+            button(
+              '🕹 Стол',
+              () => {
+                field = 'table';
+                sfx.play('ui');
+                render();
+              },
+              `btn small${field === 'table' ? ' primary' : ''}`,
+            ),
+          ),
+          el(
+            'p',
+            { class: 'hint', style: 'margin:6px 0 0' },
+            field === 'paddle'
+              ? 'Классика: ракетка внизу, мяч летит с постоянной скоростью. Опыт, усиления, скиллы и суперудар — всё как обычно.'
+              : 'Те же уровни на пинбольном столе: гравитация, два флиппера и плунжер. Аркадный счёт без опыта и скиллов — стол живёт по своим правилам.',
+          ),
+
           el(
             'div',
             { class: 'row', style: 'gap:26px;margin-top:18px;align-items:flex-start' },
@@ -548,16 +582,22 @@ export function mainMenu(app: App): Scene {
               'Начать',
               () =>
                 app.setScene((a) =>
-                  soloScene(a, {
-                    levels,
-                    superId: chosen,
-                    title,
-                    startIndex: opts.startIndex ?? 0,
-                    trackProgress: opts.campaign === true,
-                    lives: app.profile.lives,
-                    speed: app.profile.gameSpeed,
-                    ngPlus: opts.campaign ? app.profile.ngPlus : 0,
-                  }),
+                  field === 'table'
+                    ? pinballScene(a, {
+                        levels,
+                        startIndex: opts.startIndex ?? 0,
+                        balls: app.profile.lives,
+                      })
+                    : soloScene(a, {
+                        levels,
+                        superId: chosen,
+                        title,
+                        startIndex: opts.startIndex ?? 0,
+                        trackProgress: opts.campaign === true,
+                        lives: app.profile.lives,
+                        speed: app.profile.gameSpeed,
+                        ngPlus: opts.campaign ? app.profile.ngPlus : 0,
+                      }),
                 ),
               'btn primary',
             ),
