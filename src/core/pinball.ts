@@ -31,7 +31,7 @@ const BRICK_BOUNCE = 0.94;
  *  flipper's own motion it takes with it. Both were too low: the ball arrived
  *  with momentum and left without any. */
 const FLIPPER_BOUNCE = 0.72;
-const FLIPPER_TRANSFER = 0.8;
+const FLIPPER_TRANSFER = 1;
 
 export interface PinBall {
   x: number;
@@ -39,6 +39,9 @@ export interface PinBall {
   vx: number;
   vy: number;
   r: number;
+  /** Inside the plunger lane: on the plunger, or on its way up out of it.
+   *  For every other ball the lane's wall is solid over its whole height. */
+  lane?: boolean;
   /** In the plunger lane, waiting to be launched. */
   waiting: boolean;
   /** Held by a lock. */
@@ -189,6 +192,7 @@ export class PinballTable {
       vy: 0,
       r: 7,
       waiting: true,
+      lane: true,
       captured: false,
       trail: [],
     });
@@ -229,7 +233,7 @@ export class PinballTable {
       const target = f.active ? f.up : f.rest;
       const was = f.angle;
       // Fast up, slower back down: a flipper should snap and then relax.
-      const rate = f.active ? 22 : 13;
+      const rate = f.active ? 34 : 13;
       const step = rate * dt;
       f.angle = Math.abs(target - f.angle) <= step ? target : f.angle + Math.sign(target - f.angle) * step;
       f.omega = dt > 0 ? (f.angle - was) / dt : 0;
@@ -253,6 +257,7 @@ export class PinballTable {
       // as a broken game, not as a gentle shot.
       const power = Math.max(0.25, this.plunger);
       ball.waiting = false;
+      ball.lane = true;
       ball.vy = -(320 + power * 560);
       ball.vx = 0;
       this.state = 'play';
@@ -331,7 +336,6 @@ export class PinballTable {
   }
 
   private collideWalls(b: PinBall): void {
-    const inLane = b.x > ARENA_W - WALL - LANE_W;
     if (b.x - b.r < WALL) {
       b.x = WALL + b.r;
       b.vx = Math.abs(b.vx) * WALL_BOUNCE;
@@ -347,19 +351,27 @@ export class PinballTable {
       this.events.push({ t: 'wall' });
     }
 
-    // The lane's inner wall, which the ball leaves over the top.
     const laneLeft = ARENA_W - WALL - LANE_W;
-    if (b.y > LANE_TOP && inLane && b.x - b.r < laneLeft) {
-      b.x = laneLeft + b.r;
-      b.vx = Math.abs(b.vx) * WALL_BOUNCE;
-    }
-
-    // A one-way gate across the mouth of the lane. Without it a ball that comes
-    // back down the right-hand side falls into the lane and sits on the plunger
-    // with no way out — the table looks broken while it is merely stuck.
-    if (b.x + b.r > laneLeft && b.vy > 0 && b.y > LANE_TOP - 12 && b.y < LANE_TOP + 24) {
+    if (b.lane) {
+      // On the way out: the channel keeps it straight until it clears the mouth.
+      if (b.y + b.r < LANE_TOP) b.lane = false;
+      else if (b.x - b.r < laneLeft) {
+        b.x = laneLeft + b.r;
+        b.vx = Math.abs(b.vx) * WALL_BOUNCE;
+      }
+    } else if (b.x + b.r > laneLeft) {
+      // For everyone else the lane simply is not there. A gate over the mouth
+      // alone was not enough: a ball that slipped past it below the gate was
+      // then held inside the channel by its own wall and fell out under the
+      // plunger — the ball vanished through the base of the table.
       b.x = laneLeft - b.r;
       b.vx = -Math.abs(b.vx || 60) * WALL_BOUNCE;
+      this.events.push({ t: 'wall' });
+    }
+
+    if (b.lane && b.y + b.r > ARENA_H - 18) {
+      b.y = ARENA_H - 18 - b.r;
+      b.vy = -Math.abs(b.vy) * 0.3;
     }
 
     // The two slopes that funnel a falling ball towards the flippers.
@@ -410,7 +422,15 @@ export class PinballTable {
       b.vy += armX * f.omega * FLIPPER_TRANSFER;
 
       // A moving flipper always sends the ball up, even caught on the tip.
-      if (f.omega !== 0 && b.vy > -180) b.vy = -180 - Math.abs(f.omega) * 16;
+      if (f.omega !== 0 && b.vy > -260) b.vy = -260 - Math.abs(f.omega) * 14;
+      // Clamp here and not only at the top of the frame: a tip hit can more
+      // than double the speed mid-frame, and the sub-step count was chosen
+      // before that happened.
+      const out = Math.hypot(b.vx, b.vy);
+      if (out > PINBALL_MAX_SPEED) {
+        b.vx = (b.vx / out) * PINBALL_MAX_SPEED;
+        b.vy = (b.vy / out) * PINBALL_MAX_SPEED;
+      }
       this.events.push({ t: 'wall' });
     }
   }
