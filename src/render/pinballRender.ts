@@ -1,5 +1,5 @@
 import { ARENA_H, ARENA_W, BRICK_H, WALL } from '../core/constants';
-import { PIN_LANE, type PinballTable } from '../core/pinball';
+import { PIN_LANE, PIN_SLOPES, flipperTip, type PinballTable } from '../core/pinball';
 import type { ArenaFx } from './fx';
 import { FONT } from './renderer';
 
@@ -65,10 +65,10 @@ function drawSlopes(ctx: CanvasRenderingContext2D): void {
   ctx.lineWidth = 4;
   ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(WALL, ARENA_H - 150);
-  ctx.lineTo(WALL + 92, ARENA_H - 150 + 69);
-  ctx.moveTo(ARENA_W - WALL - PIN_LANE.w, ARENA_H - 150);
-  ctx.lineTo(ARENA_W - WALL - PIN_LANE.w - 92, ARENA_H - 150 + 69);
+  for (const s of PIN_SLOPES) {
+    ctx.moveTo(s.x0, s.y0);
+    ctx.lineTo(s.x1, s.y1);
+  }
   ctx.stroke();
   ctx.restore();
 }
@@ -185,8 +185,7 @@ function drawLane(ctx: CanvasRenderingContext2D, table: PinballTable): void {
 
 function drawFlippers(ctx: CanvasRenderingContext2D, table: PinballTable): void {
   for (const f of table.flippers) {
-    const tipX = f.x + Math.cos(f.angle) * f.length * f.side;
-    const tipY = f.y + Math.sin(f.angle) * f.length;
+    const tip = flipperTip(f);
     ctx.save();
     ctx.strokeStyle = f.active ? '#ffd24d' : '#4de2ff';
     ctx.shadowColor = ctx.strokeStyle;
@@ -195,7 +194,7 @@ function drawFlippers(ctx: CanvasRenderingContext2D, table: PinballTable): void 
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(f.x, f.y);
-    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(tip.x, tip.y);
     ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.beginPath();

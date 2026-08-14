@@ -15,15 +15,23 @@ import { Rng } from './rng';
  *  Everything below is deterministic given the same seed and inputs, like the
  *  Arena, so the table could go over the network later without being rewritten. */
 
-export const GRAVITY = 780;
+/** A real table is a shallow slope, not a cliff: at 780 the ball could not be
+ *  flipped back to the top of the playfield at all, which read as a ball with
+ *  no momentum. */
+export const GRAVITY = 520;
 /** Nothing may exceed this, or the ball tunnels through a flipper in one step. */
-export const PINBALL_MAX_SPEED = 900;
+export const PINBALL_MAX_SPEED = 1000;
 export const PINBALL_BALLS = 3;
 
 /** How bouncy each surface is. A table that returns all the energy is a table
  *  where the ball never settles. */
-const WALL_BOUNCE = 0.72;
-const BRICK_BOUNCE = 0.86;
+const WALL_BOUNCE = 0.86;
+const BRICK_BOUNCE = 0.94;
+/** How much of its speed a ball keeps off a flipper, and how much of the
+ *  flipper's own motion it takes with it. Both were too low: the ball arrived
+ *  with momentum and left without any. */
+const FLIPPER_BOUNCE = 0.72;
+const FLIPPER_TRANSFER = 0.8;
 
 export interface PinBall {
   x: number;
@@ -197,10 +205,17 @@ export class PinballTable {
       if (this.comboT <= 0) this.combo = 0;
     }
 
-    this.updateFlippers(dt, input);
+    // A flipper's tip crosses more than a ball's width in one frame, so the
+    // swing and the balls have to advance together in small steps — otherwise a
+    // fast flip jumps straight past a resting ball instead of launching it.
+    const swinging = this.flippers.some((f) => f.angle !== (f.active ? f.up : f.rest));
+    const sub = swinging ? 4 : 1;
+    for (let i = 0; i < sub; i++) {
+      this.updateFlippers(dt / sub, input);
+      this.updateBalls(dt / sub);
+    }
     this.updatePlunger(dt, input);
     this.updateProps(dt);
-    this.updateBalls(dt);
 
     if (this.remaining <= 0) {
       this.state = 'cleared';
@@ -348,14 +363,12 @@ export class PinballTable {
     }
 
     // The two slopes that funnel a falling ball towards the flippers.
-    this.collideSlope(b, WALL, ARENA_H - 150, 92, 1);
-    this.collideSlope(b, ARENA_W - WALL - LANE_W, ARENA_H - 150, 92, -1);
+    for (const s of PIN_SLOPES) this.collideSlope(b, s);
   }
 
-  /** A diagonal wall running down towards the middle of the table. */
-  private collideSlope(b: PinBall, x0: number, y0: number, len: number, dir: 1 | -1): void {
-    const x1 = x0 + len * dir;
-    const y1 = y0 + len * 0.75;
+  /** A diagonal wall running down to a flipper's pivot. */
+  private collideSlope(b: PinBall, seg: { x0: number; y0: number; x1: number; y1: number }): void {
+    const { x0, y0, x1, y1 } = seg;
     const hit = closestOnSegment(b.x, b.y, x0, y0, x1, y1);
     const dx = b.x - hit.x;
     const dy = b.y - hit.y;
@@ -372,9 +385,8 @@ export class PinballTable {
 
   private collideFlippers(b: PinBall): void {
     for (const f of this.flippers) {
-      const tipX = f.x + Math.cos(f.angle) * f.length * f.side;
-      const tipY = f.y + Math.sin(f.angle) * f.length;
-      const hit = closestOnSegment(b.x, b.y, f.x, f.y, tipX, tipY);
+      const tip = flipperTip(f);
+      const hit = closestOnSegment(b.x, b.y, f.x, f.y, tip.x, tip.y);
       const dx = b.x - hit.x;
       const dy = b.y - hit.y;
       const d = Math.hypot(dx, dy) || 0.001;
@@ -389,18 +401,16 @@ export class PinballTable {
       // Reflect, then add what the flipper itself is doing: the difference
       // between a dead bat and a swing is entirely in this term.
       const dot = b.vx * nx + b.vy * ny;
-      b.vx = (b.vx - 2 * dot * nx) * 0.55;
-      b.vy = (b.vy - 2 * dot * ny) * 0.55;
+      b.vx = (b.vx - 2 * dot * nx) * FLIPPER_BOUNCE;
+      b.vy = (b.vy - 2 * dot * ny) * FLIPPER_BOUNCE;
 
       const armX = hit.x - f.x;
       const armY = hit.y - f.y;
-      const surfaceX = -armY * f.omega;
-      const surfaceY = armX * f.omega;
-      b.vx += surfaceX * 0.55;
-      b.vy += surfaceY * 0.55;
+      b.vx += -armY * f.omega * FLIPPER_TRANSFER;
+      b.vy += armX * f.omega * FLIPPER_TRANSFER;
 
-      // A moving flipper always sends the ball up, even at the tip.
-      if (f.omega !== 0 && b.vy > -120) b.vy = -120 - Math.abs(f.omega) * 12;
+      // A moving flipper always sends the ball up, even caught on the tip.
+      if (f.omega !== 0 && b.vy > -180) b.vy = -180 - Math.abs(f.omega) * 16;
       this.events.push({ t: 'wall' });
     }
   }
@@ -464,8 +474,8 @@ export class PinballTable {
         case 'bumper':
           b.x = p.x + nx * (reach + 1);
           b.y = p.y + ny * (reach + 1);
-          b.vx = nx * 430;
-          b.vy = ny * 430;
+          b.vx = nx * 480;
+          b.vy = ny * 480;
           this.shake = Math.min(1, this.shake + 0.2);
           break;
         case 'sling': {
@@ -520,21 +530,26 @@ export class PinballTable {
 }
 
 function makeFlipper(side: -1 | 1): Flipper {
-  const gap = 34;
-  const x = ARENA_W / 2 + side * gap;
-  const y = ARENA_H - 78;
   return {
     side,
-    x,
-    y,
-    length: 62,
-    // Angles are measured from the pivot outwards, so both flippers use the
-    // same numbers and `side` mirrors them.
+    x: FLIPPER_PIVOT.x(side),
+    y: FLIPPER_PIVOT.y,
+    length: FLIPPER_PIVOT.length,
+    // Measured from the pivot inwards: at rest the tip hangs below the pivot,
+    // flipped it swings above it.
     rest: 0.42,
     up: -0.52,
     angle: 0.42,
     omega: 0,
     active: false,
+  };
+}
+
+/** Where a flipper's tip is: inward from its pivot, which is what `-side` says. */
+export function flipperTip(f: Flipper): { x: number; y: number } {
+  return {
+    x: f.x - Math.cos(f.angle) * f.length * f.side,
+    y: f.y + Math.sin(f.angle) * f.length,
   };
 }
 
@@ -557,3 +572,20 @@ export function closestOnSegment(
 }
 
 export const PIN_LANE = { x: LANE_X, w: LANE_W };
+
+/** The pivot belongs at the outer end, with the tip reaching in towards the
+ *  drain — the other way round is a mirror of a real table and plays like one. */
+export const FLIPPER_PIVOT = {
+  x: (side: -1 | 1) => (ARENA_W - LANE_W) / 2 + side * 100,
+  y: ARENA_H - 78,
+  length: 74,
+};
+
+/** The slopes that funnel a falling ball onto the flippers. They end on the
+ *  pivots, so nothing can slip down the gap between wall and flipper. */
+export const PIN_SLOPES = [-1, 1].map((s) => ({
+  x0: s < 0 ? WALL : ARENA_W - WALL - LANE_W,
+  y0: ARENA_H - 150,
+  x1: FLIPPER_PIVOT.x(s as -1 | 1),
+  y1: FLIPPER_PIVOT.y,
+}));
