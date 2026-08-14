@@ -33,6 +33,7 @@ import { ALL_ENTRIES, type StoryEntry } from '../core/story';
 import { net } from '../net/client';
 import { netVersusScene } from '../game/netVersus';
 import { raceScene } from '../game/race';
+import { pinballScene } from '../game/pinball';
 import { RACE_DISTANCES, SEAT_KEY_LABELS, TEAM_COLORS, TEAM_LABELS } from '../core/race';
 import { RaceNet } from '../game/raceNet';
 import type { RaceSeat } from '../net/raceProtocol';
@@ -170,6 +171,18 @@ export function mainMenu(app: App): Scene {
             'Гонка',
             'Настолка на 2–6 игроков: кубик, червоточины, бафы и дебафы в чужой уровень',
             () => screenRace(),
+          ),
+          modeCard(
+            '🕹',
+            'Пинбол',
+            'Настоящий стол: гравитация, флипперы и плунжер, а кирпичи наверху',
+            () =>
+              app.setScene((a) =>
+                pinballScene(a, {
+                  levels: a.campaignLevels(),
+                  startIndex: Math.min(12, CAMPAIGN_SIZE - 1),
+                }),
+              ),
           ),
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),
