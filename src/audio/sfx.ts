@@ -256,6 +256,12 @@ export class Sfx {
         case 'targetsDown':
           this.play('levelup');
           break;
+        case 'multiball':
+          this.play('super');
+          break;
+        case 'cellarPot':
+          this.play(e.won ? 'levelup' : 'lifeLost');
+          break;
         case 'bossGrab':
           this.play(e.taken ? 'super' : 'explosion');
           break;

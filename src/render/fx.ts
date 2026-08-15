@@ -89,6 +89,14 @@ export class ArenaFx {
           this.text(240, 260, 'МИШЕНИ СБИТЫ', '#3ddc84');
           this.ring(e.x, e.y, 120, '#3ddc84');
           break;
+        case 'multiball':
+          this.text(240, 280, 'ДЖЕКПОТ · МУЛЬТИБОЛ', '#ffd24d');
+          this.ring(e.x, e.y, 150, '#ffd24d');
+          break;
+        case 'cellarPot':
+          this.text(240, 300, e.won ? `БАНК ВЗЯТ +${e.amount}` : `БАНК СГОРЕЛ −${e.amount}`, e.won ? '#ffd24d' : '#ff4d6d');
+          this.ring(e.x, e.y, e.won ? 140 : 90, e.won ? '#ffd24d' : '#ff4d6d');
+          break;
         case 'bossGrab':
           this.text(240, 300, e.taken ? 'МЯЧ ЗАХВАЧЕН' : 'МЯЧ ОТПУЩЕН', e.taken ? '#ff2d55' : '#ffd24d');
           this.ring(e.x, e.y, e.taken ? 160 : 120, e.taken ? '#ff2d55' : '#ffd24d');

@@ -101,6 +101,8 @@ export type ArenaEvent =
   | { t: 'bossGrab'; taken: boolean; x: number; y: number }
   | { t: 'prop'; kind: Prop['kind']; x: number; y: number; score: number }
   | { t: 'targetsDown'; x: number; y: number }
+  | { t: 'multiball'; x: number; y: number }
+  | { t: 'cellarPot'; x: number; y: number; amount: number; won: boolean }
   | { t: 'bossShotHit'; x: number; y: number }
   | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
@@ -405,7 +407,7 @@ export class Arena {
     this.powerups = [];
     this.lasers = [];
     this.balls = [];
-    this.basement?.clear();
+    this.basement?.reset();
     this.timers = zeroTimers();
     this.active = null;
     this.state = 'serve';
@@ -1160,14 +1162,34 @@ export class Arena {
     for (const e of bs.drainEvents()) {
       switch (e.t) {
         case 'bumper':
-          this.events.push({ t: 'prop', kind: 'bumper', x: e.x, y: e.y, score: 25 });
-          this.score += 25;
+          // Nothing down there pays on the spot — it all rides on the pot.
+          this.events.push({ t: 'prop', kind: 'bumper', x: e.x, y: e.y, score: 0 });
           break;
+        case 'target':
+          this.events.push({ t: 'prop', kind: 'target', x: e.x, y: e.y, score: 0 });
+          break;
+        case 'word':
+          this.events.push({ t: 'targetsDown', x: e.x, y: e.y });
+          break;
+        case 'lockIn':
+          this.events.push({ t: 'prop', kind: 'lock', x: e.x, y: e.y, score: 0 });
+          break;
+        case 'multiball': {
+          // The ball is already on its way back up; it comes home with a twin.
+          const twin = this.makeBall(e.x, ARENA_H - BALL_R - 2, 0);
+          twin.vx = Math.abs(twin.vx) || 120;
+          twin.vy = -Math.abs(twin.vy || 300);
+          this.balls.push(twin);
+          this.events.push({ t: 'multiball', x: e.x, y: e.y });
+          break;
+        }
         case 'saved':
-          this.events.push({ t: 'hit', x: e.x, y: ARENA_H - 12, color: '#3ddc84' });
-          this.score += 150;
+          this.score += e.pot;
+          this.addXp(e.pot / 8);
+          this.events.push({ t: 'cellarPot', x: e.x, y: ARENA_H - 40, amount: e.pot, won: true });
           break;
         case 'lost':
+          if (e.pot > 0) this.events.push({ t: 'cellarPot', x: e.x, y: ARENA_H - 40, amount: e.pot, won: false });
           this.events.push({ t: 'ballLost', x: e.x });
           if (this.balls.length === 0 && !bs.busy && this.state === 'play') this.loseLife();
           break;

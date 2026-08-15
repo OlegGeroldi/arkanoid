@@ -47,6 +47,75 @@ export function drawBasement(
   }
   ctx.stroke();
 
+  // The pot, written large on the back wall — the whole reason to be down here.
+  {
+    const hot = bs.busy && !bs.cold;
+    const amount = bs.busy ? bs.payout : 0;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = focus;
+    ctx.fillStyle = bs.cold ? 'rgba(255,95,162,0.5)' : 'rgba(255,210,77,0.85)';
+    ctx.shadowColor = hot ? '#ffd24d' : 'transparent';
+    ctx.shadowBlur = hot ? 18 : 0;
+    ctx.font = '800 52px Inter, system-ui, sans-serif';
+    ctx.fillText(String(amount).padStart(5, '0'), w / 2, ARENA_H + BASEMENT_H * 0.5);
+    ctx.font = '700 12px Inter, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillText(
+      bs.potMul > 1 ? 'БАНК ×2 — ВЫБЕЙ МЯЧ НАВЕРХ' : bs.cold ? 'БАНК ТАЕТ' : 'БАНК',
+      w / 2,
+      ARENA_H + BASEMENT_H * 0.5 + 22,
+    );
+    ctx.restore();
+  }
+
+  for (const t of bs.targets) {
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    if (t.down) {
+      ctx.strokeStyle = 'rgba(120,150,220,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-13, 0);
+      ctx.lineTo(13, 0);
+      ctx.stroke();
+    } else {
+      ctx.shadowColor = '#b06bff';
+      ctx.shadowBlur = 10 + t.flash * 20;
+      ctx.fillStyle = `rgba(176,107,255,${0.2 + t.flash * 0.5})`;
+      ctx.strokeStyle = `rgba(176,107,255,${0.7 + t.flash * 0.3})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(-13, -9, 26, 18, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.font = '800 13px Inter, system-ui, sans-serif';
+      ctx.fillText(t.letter, 0, 5);
+    }
+    ctx.restore();
+  }
+
+  for (const l of bs.locks) {
+    ctx.save();
+    ctx.translate(l.x, l.y);
+    const live = l.ball !== null;
+    ctx.shadowColor = '#ffd24d';
+    ctx.shadowBlur = live ? 26 : 10 + l.flash * 16;
+    ctx.fillStyle = live ? 'rgba(255,210,77,0.55)' : 'rgba(4,7,16,0.9)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 19, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = l.armed || live ? 'rgba(255,210,77,0.8)' : 'rgba(255,210,77,0.2)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([5, 4]);
+    ctx.lineDashOffset = -t * 14;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   for (const p of bs.bumpers) {
     ctx.save();
     ctx.shadowColor = '#ff5fa2';
@@ -86,10 +155,14 @@ export function drawBasement(
     ctx.globalAlpha = Math.min(1, (focus - 0.35) / 0.4);
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.font = '700 15px Inter, system-ui, sans-serif';
-    ctx.fillText('Отбей мяч обратно наверх', w / 2, ARENA_H + 44);
+    ctx.fillText('Выбей мяч наверх — заберёшь банк', w / 2, ARENA_H + 44);
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.font = '600 12px Inter, system-ui, sans-serif';
-    ctx.fillText('A и D — флипперы' + (bs.cold ? ' · бамперы остыли' : ''), w / 2, ARENA_H + 64);
+    ctx.fillText(
+      'A и D — флипперы · лунки дают мультибол' + (bs.cold ? ' · бамперы остыли' : ''),
+      w / 2,
+      ARENA_H + 64,
+    );
     ctx.restore();
   }
 
