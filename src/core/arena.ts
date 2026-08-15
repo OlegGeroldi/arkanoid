@@ -32,6 +32,7 @@ import {
   START_LIVES,
   WALL,
 } from './constants';
+import { Basement } from './basement';
 import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
 import { BRICK_KINDS, type Brick, type BrickCode } from './bricks';
@@ -136,6 +137,9 @@ export const noInput = (): ArenaInput => ({
 
 export interface ArenaOptions {
   level: LevelData;
+  /** Opens the pinball floor under the arena: a ball past the paddle drops in
+   *  there instead of being lost, and can be flipped back up. */
+  basement?: boolean;
   seed?: number;
   superId?: SuperId;
   mode?: ArenaMode;
@@ -360,9 +364,13 @@ export class Arena {
   levelTime = 0;
   bricksBroken = 0;
 
+  /** The pinball floor below, when the run was started with one. */
+  readonly basement: Basement<Ball> | null;
+
   constructor(opts: ArenaOptions) {
     this.mode = opts.mode ?? 'solo';
     this.width = opts.width ?? ARENA_W;
+    this.basement = opts.basement ? new Basement<Ball>(this.width) : null;
     this.cols = Math.round((this.width / ARENA_W) * COLS);
     this.brickW = brickWidthFor(this.width, this.cols);
     this.paddleX = this.width / 2;
@@ -397,6 +405,7 @@ export class Arena {
     this.powerups = [];
     this.lasers = [];
     this.balls = [];
+    this.basement?.clear();
     this.timers = zeroTimers();
     this.active = null;
     this.state = 'serve';
@@ -834,6 +843,7 @@ export class Arena {
     }
 
     this.updateBalls(dt);
+    this.updateBasement(dt, input, input2);
     // After the balls have moved: the attic reacts to where they ended up.
     this.updateProps(dt);
     this.updateLasers(dt);
@@ -1119,6 +1129,11 @@ export class Arena {
             ball.baseSpeed = Math.min(BALL_SPEED_MAX, ball.baseSpeed * 1.1);
           }
           this.events.push({ t: 'hit', x: ball.x, y: ARENA_H - 20, color: barrier ? '#3ddc84' : '#4de2ff' });
+        } else if (this.basement) {
+          // Not lost, only downstairs. The basement hands it back if the player
+          // can flip it out through the ceiling.
+          this.balls.splice(i, 1);
+          this.basement.take(ball);
         } else {
           this.balls.splice(i, 1);
           this.events.push({ t: 'ballLost', x: ball.x });
@@ -1126,7 +1141,40 @@ export class Arena {
       }
     }
 
-    if (this.balls.length === 0 && this.state === 'play') this.loseLife();
+    // A ball still bouncing around the basement is still in play.
+    if (this.balls.length === 0 && !this.basement?.busy && this.state === 'play') this.loseLife();
+  }
+
+  /** The pinball floor runs on the same keys as the paddle: while the ball is
+   *  down there the paddle has nothing to do anyway. */
+  private updateBasement(dt: number, input: ArenaInput, input2?: ArenaInput): void {
+    const bs = this.basement;
+    if (!bs) return;
+    const left = input.left || input2?.left || false;
+    const right = input.right || input2?.right || false;
+    for (const ball of bs.update(dt, left, right)) {
+      // Back upstairs with its own speed restored on the next frame.
+      ball.y = ARENA_H - ball.r - 1;
+      this.balls.push(ball);
+    }
+    for (const e of bs.drainEvents()) {
+      switch (e.t) {
+        case 'bumper':
+          this.events.push({ t: 'prop', kind: 'bumper', x: e.x, y: e.y, score: 25 });
+          this.score += 25;
+          break;
+        case 'saved':
+          this.events.push({ t: 'hit', x: e.x, y: ARENA_H - 12, color: '#3ddc84' });
+          this.score += 150;
+          break;
+        case 'lost':
+          this.events.push({ t: 'ballLost', x: e.x });
+          if (this.balls.length === 0 && !bs.busy && this.state === 'play') this.loseLife();
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   private collideWalls(ball: Ball): void {
@@ -2055,6 +2103,7 @@ export class Arena {
   // ------------------------------------------------------------------ life --
 
   private loseLife(): void {
+    this.basement?.clear();
     if (this.god) {
       this.balls = [];
       this.state = 'serve';

@@ -31,6 +31,8 @@ const BRICK_BOUNCE = 0.94;
  *  flipper's own motion it takes with it. Both were too low: the ball arrived
  *  with momentum and left without any. */
 const FLIPPER_BOUNCE = 0.72;
+/** A flipper lying still deadens the ball instead of trampolining it. */
+const FLIPPER_LIMP = 0.3;
 const FLIPPER_TRANSFER = 1;
 
 export interface PinBall {
@@ -390,9 +392,7 @@ export class PinballTable {
     const ny = dy / d;
     b.x = hit.x + nx * b.r;
     b.y = hit.y + ny * b.r;
-    const dot = b.vx * nx + b.vy * ny;
-    b.vx = (b.vx - 2 * dot * nx) * WALL_BOUNCE;
-    b.vy = (b.vy - 2 * dot * ny) * WALL_BOUNCE;
+    bounceOff(b, nx, ny, WALL_BOUNCE);
   }
 
   private collideFlippers(b: PinBall): void {
@@ -412,9 +412,7 @@ export class PinballTable {
 
       // Reflect, then add what the flipper itself is doing: the difference
       // between a dead bat and a swing is entirely in this term.
-      const dot = b.vx * nx + b.vy * ny;
-      b.vx = (b.vx - 2 * dot * nx) * FLIPPER_BOUNCE;
-      b.vy = (b.vy - 2 * dot * ny) * FLIPPER_BOUNCE;
+      bounceOff(b, nx, ny, f.omega !== 0 ? FLIPPER_BOUNCE : FLIPPER_LIMP);
 
       const armX = hit.x - f.x;
       const armY = hit.y - f.y;
@@ -566,6 +564,26 @@ function makeFlipper(side: -1 | 1): Flipper {
 }
 
 /** Where a flipper's tip is: inward from its pivot, which is what `-side` says. */
+/** Bounces a ball off a surface. Only the part of the speed that runs into the
+ *  surface is damped — the part that runs along it is what carries the ball
+ *  onwards, and scaling the whole vector (which is what this used to do) made
+ *  every glancing touch eat the ball's run and let it fall asleep on a flipper
+ *  instead of rolling off it. */
+export function bounceOff(
+  b: { vx: number; vy: number },
+  nx: number,
+  ny: number,
+  keep: number,
+  friction = 0.99,
+): void {
+  const vn = b.vx * nx + b.vy * ny;
+  const tx = b.vx - vn * nx;
+  const ty = b.vy - vn * ny;
+  const out = -vn * keep;
+  b.vx = tx * friction + out * nx;
+  b.vy = ty * friction + out * ny;
+}
+
 export function flipperTip(f: Flipper): { x: number; y: number } {
   return {
     x: f.x - Math.cos(f.angle) * f.length * f.side,

@@ -21,6 +21,8 @@ import { net } from '../net/client';
 import { routeChoices, ROUTES, SEGMENT, segmentOf, type RouteDef, type RouteId } from '../core/routes';
 import { BOSS_DEFEAT, BOSS_INTRO, cycleLine, FINALE, PROLOGUE, ROUTE_LORE, type StoryEntry } from '../core/story';
 import { generateLevel } from '../core/levelGen';
+import { BASEMENT_H } from '../core/basement';
+import { drawBasement } from '../render/basementRender';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -49,6 +51,8 @@ export interface SoloOptions {
   ngPlus?: number;
   /** Abilities to equip; defaults to the profile's loadout. */
   skills?: (SkillId | null)[];
+  /** Play on two floors: a pinball cellar catches balls that pass the paddle. */
+  basement?: boolean;
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
@@ -68,6 +72,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   const startStats = resume?.stats ?? { ...baseStats(), xpMul: ngXpMul(cycle) };
   let arena = new Arena({
     level: levels[index],
+    basement: opts.basement,
     superId: resume?.superId ?? opts.superId,
     mode: 'solo',
     lives: resume?.lives ?? opts.lives,
@@ -569,16 +574,18 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
 
     draw(ctx, w, h) {
       ctx.save();
-      layout = fitBox(ctx, w, h, SCENE_W, SCENE_H);
+      const sceneH = SCENE_H + (arena.basement ? BASEMENT_H : 0);
+      layout = fitBox(ctx, w, h, SCENE_W, sceneH);
 
       ctx.save();
       ctx.beginPath();
-      ctx.rect(0, 0, ARENA_W, ARENA_H);
+      ctx.rect(0, 0, ARENA_W, sceneH);
       ctx.clip();
       drawArena(ctx, arena, fx, t, !app.input.locked);
+      if (arena.basement) drawBasement(ctx, arena.basement, t);
       ctx.restore();
 
-      drawHud(ctx, arena, ARENA_W + GAP, 0, HUD_W, SCENE_H, {
+      drawHud(ctx, arena, ARENA_W + GAP, 0, HUD_W, sceneH, {
         title: opts.title,
         accent: '#4de2ff',
         subtitle: `${arena.level.name} · ${index + 1}/${levels.length}${speed > 1 ? ` · ×${speed}` : ''}`,

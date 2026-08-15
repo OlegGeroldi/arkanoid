@@ -460,7 +460,7 @@ export function mainMenu(app: App): Scene {
     if (!isSuperUnlocked(app.profile, chosen)) chosen = 'barrage';
     /** Which physics these levels are played with. The same hundred fields work
      *  either way; what changes is whether the ball falls. */
-    let field: 'paddle' | 'table' = 'paddle';
+    let field: 'paddle' | 'floors' | 'table' = 'paddle';
 
     const render = (): void => {
       renderSolo = render;
@@ -502,6 +502,15 @@ export function mainMenu(app: App): Scene {
               `btn small${field === 'paddle' ? ' primary' : ''}`,
             ),
             button(
+              '🏚 Два этажа',
+              () => {
+                field = 'floors';
+                sfx.play('ui');
+                render();
+              },
+              `btn small${field === 'floors' ? ' primary' : ''}`,
+            ),
+            button(
               '🕹 Стол',
               () => {
                 field = 'table';
@@ -516,7 +525,9 @@ export function mainMenu(app: App): Scene {
             { class: 'hint', style: 'margin:6px 0 0' },
             field === 'paddle'
               ? 'Классика: ракетка внизу, мяч летит с постоянной скоростью. Опыт, усиления, скиллы и суперудар — всё как обычно.'
-              : 'Те же уровни на пинбольном столе: гравитация, два флиппера и плунжер. Аркадный счёт без опыта и скиллов — стол живёт по своим правилам.',
+              : field === 'floors'
+                ? 'Верхний этаж — обычный арканоид с ракеткой. Мяч, ушедший мимо ракетки, не пропадает: он проваливается в пинбольный подвал, где работают гравитация, бамперы и два флиппера на тех же клавишах. Закинули обратно через потолок — играем дальше, жизнь цела.'
+                : 'Те же уровни на пинбольном столе: гравитация, два флиппера и плунжер. Аркадный счёт без опыта и скиллов — стол живёт по своим правилам.',
           ),
 
           el(
@@ -596,6 +607,7 @@ export function mainMenu(app: App): Scene {
                         trackProgress: opts.campaign === true,
                         lives: app.profile.lives,
                         speed: app.profile.gameSpeed,
+                        basement: field === 'floors',
                         ngPlus: opts.campaign ? app.profile.ngPlus : 0,
                       }),
                 ),
