@@ -37,6 +37,16 @@ const POT_DECAY = 70;
 const TARGET_W = 26;
 const LOCK_R = 19;
 const LOCK_HOLD = 0.9;
+const SPIN_COOLDOWN = 0.25;
+const REEL_SPIN = 0.45;
+/** Two of a kind is the drip that keeps a machine interesting; three is the win. */
+const POT_PAIR = 120;
+/** The one-armed bandit. Three of a kind pays; one of the faces is a skull, so
+ *  crossing the spinner is a gamble and not a free lunch. */
+const REELS = ['7', '★', '⚡', '✚', '☠'] as const;
+export type Reel = (typeof REELS)[number];
+/** The lit gap in the ceiling: come out through it and the pot doubles. */
+const EXIT_W = 84;
 /** Everything the ball meets down here, so a rally can be saved more than once. */
 const SLOPE_TOP = BASEMENT_FLOOR - 150;
 const PIVOT_Y = BASEMENT_FLOOR - 78;
@@ -78,6 +88,8 @@ export interface LockHole<T> {
   flash: number;
 }
 
+export type SlotPrize = 'chips' | 'life' | 'pot' | 'super' | 'capsule' | 'bust';
+
 export type BasementEvent =
   | { t: 'caught'; x: number }
   | { t: 'bumper'; x: number; y: number }
@@ -85,8 +97,10 @@ export type BasementEvent =
   | { t: 'word'; x: number; y: number }
   | { t: 'lockIn'; x: number; y: number }
   | { t: 'multiball'; x: number; y: number }
+  | { t: 'spin' }
+  | { t: 'prize'; kind: SlotPrize; x: number; y: number }
   | { t: 'flip' }
-  | { t: 'saved'; x: number; pot: number }
+  | { t: 'saved'; x: number; pot: number; double: boolean }
   | { t: 'lost'; x: number; pot: number };
 
 function makeFlipper(cx: number, side: -1 | 1): Flipper {
@@ -114,6 +128,12 @@ export class Basement<T extends FallingBall = FallingBall> {
   pot = 0;
   /** Doubled for the rest of the level once the word is spelled. */
   potMul: 1 | 2 = 1;
+  /** The bandit: a spinner in the middle lane and three reels on the wall. */
+  spinner = { x: 0, y: 0, half: 27, spin: 0, cooldown: 0 };
+  reels: Reel[] = ['7', '★', '⚡'];
+  reelT = 0;
+  /** Centre of the lit gap in the ceiling, redrawn every time a ball drops in. */
+  exitX = 0;
   slopes: { x0: number; y0: number; x1: number; y1: number }[];
   events: BasementEvent[] = [];
   /** Seconds the current ball has spent down here. */
@@ -138,7 +158,11 @@ export class Basement<T extends FallingBall = FallingBall> {
    *  field as well as the normal one. */
   private halfWidth: number;
 
-  constructor(readonly width: number) {
+  constructor(
+    readonly width: number,
+    /** The arena's own stream, so a seeded run rolls the same reels twice. */
+    private roll: () => number = Math.random,
+  ) {
     const cx = width / 2;
     this.halfWidth = Math.min(width / 2 - WALL, 240);
     this.flippers = [makeFlipper(cx, -1), makeFlipper(cx, 1)];
@@ -172,6 +196,10 @@ export class Basement<T extends FallingBall = FallingBall> {
     this.targets = [...bank(-1, ['V', 'E', 'G'], 0.24), ...bank(1, ['A', 'S'], 0.28)];
     // The two holes. Sinking the ball in one is the best thing that can happen
     // to a ball that was, a second ago, as good as lost.
+    // Across the middle lane, where the ball passes both on its way down and on
+    // its way back up: the bandit should be hard to avoid, not hard to find.
+    this.spinner = { x: cx, y: ARENA_H + BASEMENT_H * 0.3, half: 44, spin: 0, cooldown: 0 };
+    this.exitX = cx;
     this.locks = [-1, 1].map((side) => ({
       x: cx + side * 128,
       y: ARENA_H + BASEMENT_H * 0.16,
@@ -188,6 +216,9 @@ export class Basement<T extends FallingBall = FallingBall> {
     // The holes stay shut until the ball has been struck at least once: falling
     // straight into a jackpot would make the cellar pay for doing nothing.
     for (const l of this.locks) l.armed = false;
+    // A fresh gap to aim the way out through.
+    const span = this.width - 2 * WALL - EXIT_W;
+    this.exitX = WALL + EXIT_W / 2 + this.roll() * span;
     ball.y = ARENA_H + ball.r;
     // It arrives with whatever pace it had: falling through is not a reset.
     ball.vy = Math.max(Math.abs(ball.vy), 120);
@@ -223,6 +254,13 @@ export class Basement<T extends FallingBall = FallingBall> {
     for (const b of this.bumpers) b.flash = Math.max(0, b.flash - dt * 3);
     for (const t of this.targets) t.flash = Math.max(0, t.flash - dt * 3);
     for (const l of this.locks) l.flash = Math.max(0, l.flash - dt * 3);
+    if (this.spinner.cooldown > 0) this.spinner.cooldown -= dt;
+    if (this.spinner.spin > 0) this.spinner.spin = Math.max(0, this.spinner.spin - dt * 2);
+    if (this.reelT > 0) {
+      this.reelT -= dt;
+      if (this.reelT <= 0) this.settleReels();
+      else for (let i = 0; i < 3; i++) this.reels[i] = REELS[Math.floor(this.roll() * REELS.length)];
+    }
 
     const escaped: T[] = [];
     this.tickLocks(dt, escaped);
@@ -274,13 +312,15 @@ export class Basement<T extends FallingBall = FallingBall> {
       this.flip(b);
       this.bump(b);
       this.hitTargets(b);
+      this.crossSpinner(b);
       if (this.sink(b, i)) continue;
 
       if (b.y - b.r < ARENA_H && b.vy < 0) {
         // Out through the ceiling: back to the paddle floor, pot in hand.
         this.balls.splice(i, 1);
         escaped.push(b);
-        this.events.push({ t: 'saved', x: b.x, pot: this.payout });
+        const double = Math.abs(b.x - this.exitX) < EXIT_W / 2;
+        this.events.push({ t: 'saved', x: b.x, pot: this.payout * (double ? 2 : 1), double });
         this.pot = 0;
       } else if (b.y - b.r > BASEMENT_FLOOR) {
         this.balls.splice(i, 1);
@@ -344,10 +384,45 @@ export class Basement<T extends FallingBall = FallingBall> {
       b.vy = -PINBALL_MAX_SPEED;
       escaped.push(b);
       // A lock is an escape like any other, only a much better paid one.
-      this.events.push({ t: 'saved', x: l.x, pot: this.payout + POT_JACKPOT * this.potMul });
+      this.events.push({ t: 'saved', x: l.x, pot: this.payout + POT_JACKPOT * this.potMul, double: false });
       this.pot = 0;
       this.events.push({ t: 'multiball', x: l.x, y: l.y });
     }
+  }
+
+  /** Crossing the spinner sets the reels going. It costs nothing to spin and
+   *  pays rarely — which is exactly what a slot machine is. */
+  private crossSpinner(b: FallingBall): void {
+    const sp = this.spinner;
+    if (sp.cooldown > 0 || this.reelT > 0) return;
+    if (Math.abs(b.x - sp.x) > sp.half || Math.abs(b.y - sp.y) > 6 + b.r) return;
+    sp.cooldown = SPIN_COOLDOWN;
+    sp.spin = 1;
+    this.reelT = REEL_SPIN;
+    this.events.push({ t: 'spin' });
+  }
+
+  private settleReels(): void {
+    // Weighted stops, the way a real machine does it: the later reels lean
+    // towards the first one. Five fair reels would land three of a kind about
+    // once an hour, which is not a slot machine, it is a rumour.
+    this.reels[0] = REELS[Math.floor(this.roll() * REELS.length)];
+    for (let i = 1; i < 3; i++) {
+      this.reels[i] = this.roll() < 0.2 ? this.reels[0] : REELS[Math.floor(this.roll() * REELS.length)];
+    }
+    const [a, b, c] = this.reels;
+    if (a !== b || b !== c) {
+      if (a === b || b === c || a === c) {
+        this.pot += POT_PAIR;
+        this.events.push({ t: 'prize', kind: 'chips', x: this.spinner.x, y: this.spinner.y });
+      }
+      return;
+    }
+    const kind: SlotPrize =
+      a === '7' ? 'life' : a === '★' ? 'pot' : a === '⚡' ? 'super' : a === '✚' ? 'capsule' : 'bust';
+    if (kind === 'pot') this.pot *= 2;
+    if (kind === 'bust') this.pot = Math.round(this.pot / 2);
+    this.events.push({ t: 'prize', kind, x: this.spinner.x, y: this.spinner.y });
   }
 
   private walls(b: FallingBall): void {

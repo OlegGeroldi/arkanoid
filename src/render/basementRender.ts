@@ -37,6 +37,25 @@ export function drawBasement(
   ctx.stroke();
   ctx.restore();
 
+  // The lit gap: come out through it and the pot doubles.
+  if (bs.busy) {
+    ctx.save();
+    ctx.strokeStyle = '#ffd24d';
+    ctx.shadowColor = '#ffd24d';
+    ctx.shadowBlur = 16;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(bs.exitX - 42, ARENA_H);
+    ctx.lineTo(bs.exitX + 42, ARENA_H);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,210,77,0.75)';
+    ctx.textAlign = 'center';
+    ctx.font = '800 11px Inter, system-ui, sans-serif';
+    ctx.fillText('×2', bs.exitX, ARENA_H + 16);
+    ctx.restore();
+  }
+
   ctx.strokeStyle = 'rgba(120,150,220,0.45)';
   ctx.lineWidth = 4;
   ctx.lineCap = 'round';
@@ -66,6 +85,42 @@ export function drawBasement(
       w / 2,
       ARENA_H + BASEMENT_H * 0.5 + 22,
     );
+    ctx.restore();
+  }
+
+  // The bandit: the bar the ball crosses, and the three reels it sets going.
+  {
+    const sp = bs.spinner;
+    ctx.save();
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate(sp.spin * 9);
+    ctx.strokeStyle = `rgba(77,226,255,${0.5 + sp.spin * 0.5})`;
+    ctx.shadowColor = '#4de2ff';
+    ctx.shadowBlur = 8 + sp.spin * 20;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-sp.half, 0);
+    ctx.lineTo(sp.half, 0);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = focus;
+    const y = ARENA_H + BASEMENT_H * 0.5 + 52;
+    for (let i = 0; i < 3; i++) {
+      const x = w / 2 + (i - 1) * 40;
+      ctx.fillStyle = 'rgba(4,7,16,0.85)';
+      ctx.strokeStyle = bs.reelT > 0 ? 'rgba(255,210,77,0.9)' : 'rgba(176,107,255,0.45)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x - 16, y - 16, 32, 32, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 17px Inter, system-ui, sans-serif';
+      ctx.fillText(bs.reels[i], x, y + 6);
+    }
     ctx.restore();
   }
 

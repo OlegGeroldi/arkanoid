@@ -259,6 +259,9 @@ export class Sfx {
         case 'multiball':
           this.play('super');
           break;
+        case 'slot':
+          this.play(e.kind === 'bust' ? 'dead' : e.kind === 'chips' ? 'powerup' : 'levelup');
+          break;
         case 'cellarPot':
           this.play(e.won ? 'levelup' : 'lifeLost');
           break;

@@ -102,7 +102,8 @@ export type ArenaEvent =
   | { t: 'prop'; kind: Prop['kind']; x: number; y: number; score: number }
   | { t: 'targetsDown'; x: number; y: number }
   | { t: 'multiball'; x: number; y: number }
-  | { t: 'cellarPot'; x: number; y: number; amount: number; won: boolean }
+  | { t: 'cellarPot'; x: number; y: number; amount: number; won: boolean; double?: boolean }
+  | { t: 'slot'; kind: 'chips' | 'life' | 'pot' | 'super' | 'capsule' | 'bust'; x: number; y: number }
   | { t: 'bossShotHit'; x: number; y: number }
   | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
@@ -372,7 +373,7 @@ export class Arena {
   constructor(opts: ArenaOptions) {
     this.mode = opts.mode ?? 'solo';
     this.width = opts.width ?? ARENA_W;
-    this.basement = opts.basement ? new Basement<Ball>(this.width) : null;
+    this.basement = opts.basement ? new Basement<Ball>(this.width, () => this.rng.next()) : null;
     this.cols = Math.round((this.width / ARENA_W) * COLS);
     this.brickW = brickWidthFor(this.width, this.cols);
     this.paddleX = this.width / 2;
@@ -1171,6 +1172,9 @@ export class Arena {
         case 'word':
           this.events.push({ t: 'targetsDown', x: e.x, y: e.y });
           break;
+        case 'spin':
+          this.events.push({ t: 'prop', kind: 'spinner', x: bs.spinner.x, y: bs.spinner.y, score: 0 });
+          break;
         case 'lockIn':
           this.events.push({ t: 'prop', kind: 'lock', x: e.x, y: e.y, score: 0 });
           break;
@@ -1186,7 +1190,22 @@ export class Arena {
         case 'saved':
           this.score += e.pot;
           this.addXp(e.pot / 8);
-          this.events.push({ t: 'cellarPot', x: e.x, y: ARENA_H - 40, amount: e.pot, won: true });
+          this.events.push({
+            t: 'cellarPot',
+            x: e.x,
+            y: ARENA_H - 40,
+            amount: e.pot,
+            won: true,
+            double: e.double,
+          });
+          break;
+        case 'prize':
+          // The bandit pays in the arena's own currency; the pot ones it
+          // settles for itself downstairs.
+          if (e.kind === 'life') this.lives = Math.min(9, this.lives + 1);
+          if (e.kind === 'super') this.energy = ENERGY_MAX;
+          if (e.kind === 'capsule') this.dropReward(this.paddleX, GRID_TOP + 40);
+          this.events.push({ t: 'slot', kind: e.kind, x: this.width / 2, y: ARENA_H - 60 });
           break;
         case 'lost':
           if (e.pot > 0) this.events.push({ t: 'cellarPot', x: e.x, y: ARENA_H - 40, amount: e.pot, won: false });

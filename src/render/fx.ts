@@ -93,8 +93,26 @@ export class ArenaFx {
           this.text(240, 280, 'ДЖЕКПОТ · МУЛЬТИБОЛ', '#ffd24d');
           this.ring(e.x, e.y, 150, '#ffd24d');
           break;
+        case 'slot': {
+          const line: Record<string, string> = {
+            chips: 'ДВЕ В РЯД +120',
+            life: '777 — ЛИШНЯЯ ЖИЗНЬ',
+            pot: '★★★ — БАНК УДВОЕН',
+            super: '⚡⚡⚡ — СУПЕР ЗАРЯЖЕН',
+            capsule: '✚✚✚ — КАПСУЛА НАВЕРХУ',
+            bust: '☠☠☠ — ПОЛБАНКА СГОРЕЛО',
+          };
+          this.text(240, 240, line[e.kind], e.kind === 'bust' ? '#ff4d6d' : '#ffd24d');
+          this.ring(e.x, e.y, e.kind === 'chips' ? 70 : 130, e.kind === 'bust' ? '#ff4d6d' : '#ffd24d');
+          break;
+        }
         case 'cellarPot':
-          this.text(240, 300, e.won ? `БАНК ВЗЯТ +${e.amount}` : `БАНК СГОРЕЛ −${e.amount}`, e.won ? '#ffd24d' : '#ff4d6d');
+          this.text(
+            240,
+            300,
+            e.won ? `${e.double ? 'ДАБЛ! БАНК ' : 'БАНК ВЗЯТ '}+${e.amount}` : `БАНК СГОРЕЛ −${e.amount}`,
+            e.won ? '#ffd24d' : '#ff4d6d',
+          );
           this.ring(e.x, e.y, e.won ? 140 : 90, e.won ? '#ffd24d' : '#ff4d6d');
           break;
         case 'bossGrab':
