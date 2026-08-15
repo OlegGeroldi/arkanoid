@@ -9,7 +9,9 @@ import { GRAVITY, PINBALL_MAX_SPEED, bounceOff, closestOnSegment, flipperTip, ty
  *  It works in arena coordinates, continued downwards — the ceiling is exactly
  *  the arena's floor, so a ball crosses between the two without conversion. */
 
-export const BASEMENT_H = 250;
+/** Tall enough to be a floor of its own rather than a strip under the field:
+ *  once the view slides down, the cellar is what the screen is showing. */
+export const BASEMENT_H = 520;
 /** The drain: below this the ball is really lost. */
 export const BASEMENT_FLOOR = ARENA_H + BASEMENT_H;
 
@@ -96,8 +98,9 @@ export class Basement<T extends FallingBall = FallingBall> {
     // the flippers. A third one in the middle turned the cellar into a nest the
     // ball could rattle around in forever.
     this.bumpers = [
-      { x: cx - 84, y: ARENA_H + 116, flash: 0 },
-      { x: cx + 84, y: ARENA_H + 116, flash: 0 },
+      { x: cx - 84, y: ARENA_H + BASEMENT_H * 0.42, flash: 0 },
+      { x: cx + 84, y: ARENA_H + BASEMENT_H * 0.42, flash: 0 },
+      { x: cx, y: ARENA_H + BASEMENT_H * 0.62, flash: 0 },
     ];
   }
 

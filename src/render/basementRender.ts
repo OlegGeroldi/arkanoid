@@ -5,7 +5,13 @@ import { flipperTip } from '../core/pinball';
 /** Draws the pinball floor under the arena. It is deliberately darker than the
  *  playfield above: this is the cellar, and the eye should always know which
  *  floor the ball is on. */
-export function drawBasement(ctx: CanvasRenderingContext2D, bs: Basement<any>, t: number): void {
+export function drawBasement(
+  ctx: CanvasRenderingContext2D,
+  bs: Basement<any>,
+  t: number,
+  /** 0 while the view is upstairs, 1 once it has fully slid down here. */
+  focus = 1,
+): void {
   const w = bs.width;
   ctx.save();
 
@@ -71,6 +77,19 @@ export function drawBasement(ctx: CanvasRenderingContext2D, bs: Basement<any>, t
     ctx.beginPath();
     ctx.arc(f.x, f.y, 4, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  if (focus > 0.35 && bs.busy) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = Math.min(1, (focus - 0.35) / 0.4);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.font = '700 15px Inter, system-ui, sans-serif';
+    ctx.fillText('Отбей мяч обратно наверх', w / 2, ARENA_H + 44);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '600 12px Inter, system-ui, sans-serif';
+    ctx.fillText('A и D — флипперы' + (bs.cold ? ' · бамперы остыли' : ''), w / 2, ARENA_H + 64);
     ctx.restore();
   }
 
