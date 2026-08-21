@@ -592,7 +592,7 @@ export class Arena {
     const combo = 1 + Math.min(this.combo, COMBO_MAX) * 0.1;
     const score = Math.round(p.def.score * combo);
     this.score += score;
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_DAMAGE * this.stats.energyMul);
     this.events.push({ t: 'prop', kind: p.kind, x: p.x, y: p.y, score });
 
     const dist = Math.hypot(dx, dy) || 1;
@@ -744,7 +744,7 @@ export class Arena {
 
     boss.hp -= amount;
     boss.hitFlash = 1;
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * 2 * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_DAMAGE * 2 * this.stats.energyMul);
     this.addXp(12 * amount);
     this.score += Math.round(10 * amount);
     this.events.push({ t: 'bossHit', x, y, color: boss.def.color });
@@ -1411,7 +1411,7 @@ export class Arena {
       return;
     }
     brick.hp -= dmg;
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_DAMAGE * this.stats.energyMul);
 
     if (brick.hp > 0) {
       this.events.push({ t: 'hit', x: brick.x + this.brickW / 2, y: brick.y + BRICK_H / 2, color: brick.kind.color });
@@ -1587,7 +1587,7 @@ export class Arena {
   private collect(id: PowerupId, x: number, y: number): void {
     const def = POWERUPS[id];
     this.events.push({ t: 'powerup', id, x, y });
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_POWERUP * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_POWERUP * this.stats.energyMul);
     this.score += 25;
 
     switch (id) {
@@ -1630,7 +1630,7 @@ export class Arena {
         this.addXp(120 * this.stats.xpMul);
         break;
       case 'energy':
-        this.energy = Math.min(ENERGY_MAX, this.energy + 35);
+        this.gainEnergy(35);
         break;
       case 'ballLava':
       case 'ballAqua':
@@ -1895,6 +1895,13 @@ export class Arena {
 
   // ----------------------------------------------------------------- супер --
 
+  /** Every charge the super gets goes through here, so a super that fills at
+   *  its own pace only has to say so once, in its definition. */
+  private gainEnergy(amount: number): void {
+    const mul = SUPERS[this.superId].chargeMul ?? 1;
+    this.energy = Math.min(ENERGY_MAX, this.energy + amount * mul);
+  }
+
   get superReady(): boolean {
     return this.energy >= ENERGY_MAX && !this.active;
   }
@@ -2074,7 +2081,7 @@ export class Arena {
 
   private onLevelUp(): void {
     if (this.stats.lifePerLevel) this.lives++;
-    this.energy = Math.min(ENERGY_MAX, this.energy + 15);
+    this.gainEnergy(15);
     this.events.push({ t: 'levelup', level: this.xpLevel });
 
     // Level 5 is the fork in the build: pick a specialisation instead of a perk.
@@ -2133,7 +2140,7 @@ export class Arena {
     perk.apply(this.stats);
     this.perksTaken.set(perk.id, (this.perksTaken.get(perk.id) ?? 0) + 1);
     if (perk.instant?.lives) this.lives += perk.instant.lives;
-    if (perk.instant?.energy) this.energy = Math.min(ENERGY_MAX, this.energy + perk.instant.energy);
+    if (perk.instant?.energy) this.gainEnergy(perk.instant.energy);
     if (perk.instant?.balls) this.addBall();
     if (perk.id === 'bulwark') this.shields += 2;
     this.draft = [];
