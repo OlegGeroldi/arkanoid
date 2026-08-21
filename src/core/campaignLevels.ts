@@ -66,13 +66,13 @@ export const CHAOS_FROM = Math.floor(CAMPAIGN_SIZE * 0.8) + 1; // level 81
 
 /** The full campaign: ten handcrafted openers, then generated stages that grow
  *  denser and faster, with the last fifth fully randomised and hostile. */
-function buildCampaign(theme: LevelTheme): LevelData[] {
+function buildCampaign(theme: LevelTheme, attic = true): LevelData[] {
   const levels: LevelData[] = BUILTIN_LEVELS.map((level, i) => ({
     ...level,
     id: `campaign-${i + 1}`,
   }));
   for (let i = levels.length; i < CAMPAIGN_SIZE; i++) {
-    const generated = generateLevel(i, CAMPAIGN_SIZE, 0x9e37, undefined, theme);
+    const generated = generateLevel(i, CAMPAIGN_SIZE, 0x9e37, undefined, theme, attic);
     levels.push({ ...generated, id: `campaign-${i + 1}` });
   }
 
@@ -102,8 +102,11 @@ export const CAMPAIGN_LEVELS: LevelData[] = buildCampaign('runes');
 /** The race plays the same hundred levels with the other set of pictures:
  *  smileys, skulls and short words, which suit a table of people shouting at
  *  each other rather than a lone descent. Same seed, same shapes underneath —
- *  only the drawings differ. */
-export const RACE_LEVELS: LevelData[] = buildCampaign('signs');
+ *  only the drawings differ.
+ *
+ *  And no attic: bumpers and drop targets belong to the pinball floor, and the
+ *  race has none. Left in, they were furniture from another game. */
+export const RACE_LEVELS: LevelData[] = buildCampaign('signs', false);
 
 export const isChaosLevel = (index: number): boolean => index + 1 >= CHAOS_FROM;
 

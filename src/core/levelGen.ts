@@ -408,6 +408,10 @@ export function generateLevel(
   seed = 0x9e37,
   route?: RouteDef,
   theme: LevelTheme = 'signs',
+  /** Hang the pinball furniture in the top rows. The race has no pinball floor
+   *  under it, so there the props are decoration borrowed from a game that is
+   *  not being played. */
+  attic = true,
 ): LevelData {
   const rng = new Rng((seed + index * 2654435761 + (route ? route.id.length * 7919 : 0)) >>> 0);
   const recipe = recipeFor(index, total, route);
@@ -443,7 +447,7 @@ export function generateLevel(
 
   // The attic goes up after the field is settled and before the last safety
   // pass, since it clears bricks of its own.
-  const props = index >= 10 ? hangProps(rng, grid, index, total) : [];
+  const props = attic && index >= 10 ? hangProps(rng, grid, index, total) : [];
 
   // Truly last, because mirroring can seal a pocket that was open a moment ago,
   // and one asymmetric cell is a far smaller price than a level that cannot be
