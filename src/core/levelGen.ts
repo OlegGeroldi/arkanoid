@@ -189,6 +189,136 @@ function stampGlyph(grid: string[][], glyph: Glyph, r: Recipe, rng: Rng): boolea
 
 const SHAPERS: Shaper[] = [solidBlock, checker, pyramid, columns, rings, diagonals, arena, scatter];
 
+// ------------------------------------------------------------ chaos shapes --
+
+/** The last fifth used to be two random shapers thrown on top of each other at
+ *  near-full density, which is not chaos but porridge: every level in the band
+ *  came out looking like the one before it. These are structures instead —
+ *  each one recognisable across the room, and hard because of how it is built
+ *  rather than because it is full. */
+
+/** A keep: a steel curtain with a gate in every face and the loot inside. */
+const fortress: Shaper = (rng, grid, r) => {
+  const last = r.rows - 1;
+  const mid = Math.floor(r.rows / 2);
+  const gate = COLS / 2 - 1;
+  for (let row = 0; row <= last; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const wall = row === 0 || row === last || col === 0 || col === COLS - 1;
+      const inGate =
+        ((row === 0 || row === last) && (col === gate || col === gate + 1)) ||
+        ((col === 0 || col === COLS - 1) && (row === mid || row === mid - 1));
+      if (wall) {
+        if (!inGate) put(grid, col, row, rng.next() < 0.35 ? 'x' : 's');
+      } else if (rng.next() < r.density) {
+        put(grid, col, row, rng.pick(r.palette));
+      }
+    }
+  }
+  // The donjon, worth breaking into.
+  for (let row = mid - 1; row <= mid + 1; row++) {
+    for (let col = gate - 1; col <= gate + 2; col++) put(grid, col, row, row === mid ? 'g' : 't');
+  }
+};
+
+/** Corridors: vertical walls with the doorways shifted band by band, so the
+ *  ball has to be walked down through the field rather than sprayed at it. */
+const corridors: Shaper = (rng, grid, r) => {
+  for (let row = 0; row < r.rows; row++) {
+    const band = Math.floor(row / 3);
+    for (let col = 0; col < COLS; col++) {
+      const wall = col % 3 === 1;
+      const door = (col + band * 3) % 6 === 1;
+      if (wall && !door) put(grid, col, row, rng.next() < 0.25 ? 'x' : 's');
+      else if (rng.next() < r.density) put(grid, col, row, rng.pick(r.palette));
+    }
+  }
+};
+
+/** An hourglass: heavy at both ends, pinched in the middle. */
+const hourglass: Shaper = (rng, grid, r) => {
+  const midRow = (r.rows - 1) / 2;
+  const midCol = (COLS - 1) / 2;
+  for (let row = 0; row < r.rows; row++) {
+    const away = Math.abs(row - midRow) / midRow;
+    const half = Math.max(1, Math.round(away * (COLS / 2)));
+    for (let col = 0; col < COLS; col++) {
+      const d = Math.abs(col - midCol);
+      if (d <= half) put(grid, col, row, rng.pick(r.palette));
+      else if (rng.next() < r.density * 0.25) put(grid, col, row, 'n');
+    }
+  }
+  // The waist is the hard part, as a waist should be.
+  for (let col = 0; col < COLS; col++) {
+    if (Math.abs(col - midCol) <= 1) put(grid, col, Math.round(midRow), 's');
+  }
+};
+
+/** Standing waves: three bands rolling across the field. */
+const waves: Shaper = (rng, grid, r) => {
+  const amp = Math.max(1.2, r.rows * 0.16);
+  for (let col = 0; col < COLS; col++) {
+    // Cosine, so the left half mirrors the right and the pattern reads.
+    const lift = Math.cos((col / (COLS - 1)) * Math.PI * 2) * amp;
+    for (let row = 0; row < r.rows; row++) {
+      // Two rows on, two off: a single empty row between bands was a wave
+      // nobody could see.
+      const band = ((Math.round(row - lift) % 4) + 4) % 4;
+      if (band < 2) put(grid, col, row, rng.pick(r.palette));
+    }
+  }
+};
+
+/** A lattice of blocks with clear lanes between them: easy to read, and every
+ *  block is its own little problem. */
+const lattice: Shaper = (rng, grid, r) => {
+  for (let row = 0; row < r.rows; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const blockR = Math.floor(row / 3);
+      const blockC = Math.floor(col / 3);
+      const inLane = row % 3 === 2 || col % 3 === 2;
+      if (inLane) continue;
+      const hard = (blockR + blockC) % 2 === 0;
+      put(grid, col, row, hard ? rng.pick(r.palette) : rng.pick(['n', 't', 'e'] as BrickCode[]));
+    }
+  }
+};
+
+/** A spiral wound in from the outside: one long path, and the middle is the
+ *  prize at the end of it. */
+const spiral: Shaper = (rng, grid, r) => {
+  for (let row = 0; row < r.rows; row++) {
+    for (let col = 0; col < COLS; col++) {
+      if (rng.next() < r.density * 0.5) put(grid, col, row, rng.pick(r.palette));
+    }
+  }
+  let top = 0;
+  let bottom = r.rows - 1;
+  let left = 0;
+  let right = COLS - 1;
+  let turn = 0;
+  while (top <= bottom && left <= right) {
+    for (let col = left; col <= right; col++) put(grid, col, top, 's');
+    for (let row = top; row <= bottom; row++) put(grid, right, row, 's');
+    for (let col = right; col >= left; col--) put(grid, col, bottom, 's');
+    for (let row = bottom; row >= top; row--) put(grid, left, row, 's');
+    // A gap in each turn, or the spiral would be a stack of sealed boxes.
+    put(grid, left + 1 + (turn % 2), top, EMPTY);
+    put(grid, right - 1 - (turn % 2), bottom, EMPTY);
+    top += 2;
+    bottom -= 2;
+    left += 2;
+    right -= 2;
+    turn++;
+  }
+  const cr = Math.round((r.rows - 1) / 2);
+  const cc = Math.round((COLS - 1) / 2);
+  put(grid, cc, cr, 'g');
+  put(grid, cc - 1, cr, 'g');
+};
+
+const CHAOS_SHAPERS: Shaper[] = [fortress, corridors, hourglass, waves, lattice, spiral];
+
 // ------------------------------------------------------------------ recipe --
 
 function recipeFor(index: number, total: number, route?: RouteDef): Recipe {
@@ -355,15 +485,15 @@ function hangProps(rng: Rng, grid: string[][], index: number, total: number): Le
     one.kind = 'bumper';
   }
 
-  // The bricks underneath make way, along with their neighbours: a prop wedged
-  // between two bricks never gets hit.
+  // The brick underneath makes way, along with the ones beside and below it: a
+  // prop wedged between two bricks never gets hit. It used to clear a full
+  // three by three, which for seven props ate most of the top three rows —
+  // every level in the campaign was quietly having its roof taken off.
   for (const p of props) {
-    for (let dc = -1; dc <= 1; dc++) {
-      for (let dr = -1; dr <= 1; dr++) {
-        const c = p.col + dc;
-        const r = p.row + dr;
-        if (c >= 0 && c < COLS && r >= 0 && r < ROWS) grid[r][c] = EMPTY;
-      }
+    for (const [dc, dr] of [[0, 0], [-1, 0], [1, 0], [0, 1]] as const) {
+      const c = p.col + dc;
+      const r = p.row + dr;
+      if (c >= 0 && c < COLS && r >= 0 && r < ROWS) grid[r][c] = EMPTY;
     }
   }
   return props;
@@ -422,28 +552,38 @@ export function generateLevel(
   const picture = index % 5 === 1 || index % 5 === 3;
   const glyph = picture ? pickGlyph(rng, theme) : null;
   const kept = glyph ? stampGlyph(grid, glyph, recipe, rng) : undefined;
-  if (!glyph) (recipe.chaos ? rng.pick(SHAPERS) : SHAPERS[index % SHAPERS.length])(rng, grid, recipe);
-
-  if (recipe.chaos) {
-    // Chaos levels stack a second pattern on top and skip symmetry entirely.
-    rng.pick(SHAPERS)(rng, grid, { ...recipe, density: recipe.density * 0.6 });
+  if (!glyph) {
+    // Chaos draws from its own set of structures, and walks through them in
+    // order rather than picking at random: two neighbours in the band should
+    // never be the same shape twice running.
+    const shaper = recipe.chaos
+      ? CHAOS_SHAPERS[index % CHAOS_SHAPERS.length]
+      : SHAPERS[index % SHAPERS.length];
+    // A structure needs air around it. At the chaos band's own density the
+    // filler swallowed every wall and gate, which is how twenty different
+    // shapes ended up looking like one.
+    shaper(rng, grid, recipe.chaos ? { ...recipe, density: 0.4 } : recipe);
   }
 
   wireCharges(rng, grid, recipe.rows, recipe.charge, kept);
-  // A picture keeps its shape: carving lanes through a heart would leave a
-  // heart with a hole in it and nothing gained.
-  if (!picture) carveLanes(rng, grid, recipe.rows);
   breakSteelRows(grid, recipe.rows);
 
   // Symmetry before the last safety pass: carving lanes would otherwise break
   // the mirror the shapers set up, and a lopsided field reads as sloppy rather
-  // than designed. Chaos levels stay deliberately ragged.
+  // than designed — chaos included, since a structure you cannot make out is
+  // just noise however hard it is.
   //
   // Pictograms are drawn as twelve-column palindromes, so mirroring leaves them
   // untouched and tidies the filler around them into the same symmetry — which
   // is what makes a picture level look drawn rather than sprinkled. A word is
   // never a palindrome, so those keep their scatter.
-  if (!recipe.chaos && (!picture || glyph?.mirror)) symmetrise(grid, recipe.rows);
+  if (!picture || glyph?.mirror) symmetrise(grid, recipe.rows);
+
+  // Lanes are cut after the mirror, not before it. Carving first meant every
+  // lane came back as two, which on a narrow structure took out its whole
+  // middle — an hourglass would come out with no waist at all. A picture keeps
+  // its shape for the same reason, and a chaos structure has its own gates.
+  if (!picture && !recipe.chaos) carveLanes(rng, grid, recipe.rows);
 
   // The attic goes up after the field is settled and before the last safety
   // pass, since it clears bricks of its own.
