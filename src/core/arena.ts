@@ -233,6 +233,13 @@ const EXPLOSION_BOSS_DAMAGE = 3;
 const BOSS_GRAB_AT = 0.2;
 const BOSS_GRAB_SECONDS = 5;
 
+/** How fast magnetism swings a falling ball's heading towards the paddle, in
+ *  radians a second. Expressed as a turn rather than a shove because a shove
+ *  scaled with nothing: it kept accelerating sideways until the ball was
+ *  travelling almost flat, and a flat ball is a stuck ball. A third of a second
+ *  of this is a noticeable bend; a whole fall is about thirty degrees. */
+const MAGNET_TURN = 0.55;
+
 /** A boss can only be hurt by a blast this often. One charge going off is a
  *  real hit; a chain reaction of nine is still one hit. Without this, the last
  *  boss melts the instant its shield drops, and its own dropped walls — which
@@ -1102,6 +1109,7 @@ export class Arena {
       if (ball.held !== null) continue;
 
       if (ball.type === 'void') this.voidPull(ball, dt);
+      this.magnetPull(ball, dt);
       const speed = clamp(ball.baseSpeed * globalMul * BALL_TYPES[ball.type].speed, 60, BALL_SPEED_MAX);
       setSpeed(ball, speed);
       avoidShallow(ball);
@@ -1216,6 +1224,27 @@ export class Arena {
           break;
       }
     }
+  }
+
+  /** Magnetism bends a falling ball towards the paddle. The skill has always
+   *  said it attracts the ball as well as the capsules; until now it only ever
+   *  moved the capsules. Speed is set from `baseSpeed` right after this, so
+   *  what the pull changes is the ball's heading, never its pace. */
+  private magnetPull(ball: Ball, dt: number): void {
+    if (this.timers.magnetSkill <= 0 || ball.vy <= 0) return;
+    // Only on the way down, and only over the lower half: a magnet that grabs
+    // the ball off the bricks would play the level for you.
+    if (ball.y < ARENA_H * 0.45) return;
+    const dx = this.paddleX - ball.x;
+    const rank = this.skills.find((s) => s.id === 'magnet')?.rank ?? 1;
+    // The pull fades out as the ball comes over the paddle. Cutting it off
+    // sharply instead let the stronger rank swing the ball straight past the
+    // middle and out the other side, so magnet III caught less than magnet I.
+    const near = Math.min(1, Math.abs(dx) / Math.max(48, this.paddleW));
+    const turn = MAGNET_TURN * (rank >= 3 ? 2 : 1) * near * dt;
+    // Small-angle turn of the heading: the speed is reset from baseSpeed right
+    // after this, so what survives is the change of direction.
+    ball.vx += Math.sign(dx) * Math.hypot(ball.vx, ball.vy) * turn;
   }
 
   private collideWalls(ball: Ball): void {
@@ -1705,7 +1734,11 @@ export class Arena {
         // A skill marked for warm-up opens the level charging rather than
         // loaded: the heavy openers should be earned inside the level. Ranks
         // shorten the wait along with the cooldown they came from.
-        const cd = SKILLS[id].warmup ? skillCooldown(SKILLS[id], rank) : 0;
+        //
+        // Except in the race, where a turn is short and shared: waiting out a
+        // warm-up in front of five other people is dead air, so there every
+        // skill starts loaded.
+        const cd = SKILLS[id].warmup && this.mode !== 'race' ? skillCooldown(SKILLS[id], rank) : 0;
         return { id, rank, cd, activeT: 0 };
       });
   }
@@ -1898,7 +1931,10 @@ export class Arena {
   /** Every charge the super gets goes through here, so a super that fills at
    *  its own pace only has to say so once, in its definition. */
   private gainEnergy(amount: number): void {
-    const mul = SUPERS[this.superId].chargeMul ?? 1;
+    // The race fills twice as fast. A turn there lasts a couple of minutes and
+    // everyone is watching it: a bar that never quite fills is the opposite of
+    // what the mode is for.
+    const mul = (SUPERS[this.superId].chargeMul ?? 1) * (this.mode === 'race' ? 2 : 1);
     this.energy = Math.min(ENERGY_MAX, this.energy + amount * mul);
   }
 
