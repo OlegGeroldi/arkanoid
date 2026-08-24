@@ -250,6 +250,24 @@ export class Sfx {
         case 'bossPhase':
           this.play('garbage');
           break;
+        case 'prop':
+          this.play(e.kind === 'bumper' ? 'wall' : e.kind === 'target' ? 'brickHard' : 'paddle', 4);
+          break;
+        case 'targetsDown':
+          this.play('levelup');
+          break;
+        case 'multiball':
+          this.play('super');
+          break;
+        case 'slot':
+          this.play(e.kind === 'bust' ? 'dead' : e.kind === 'chips' ? 'powerup' : 'levelup');
+          break;
+        case 'cellarPot':
+          this.play(e.won ? 'levelup' : 'lifeLost');
+          break;
+        case 'bossGrab':
+          this.play(e.taken ? 'super' : 'explosion');
+          break;
         case 'bossShotHit':
           this.play('lifeLost');
           break;

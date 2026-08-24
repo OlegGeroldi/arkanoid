@@ -42,6 +42,14 @@ export class NetClient {
   serverHall: HallEntry[] = [];
   /** Set when the page was not served by the room server. */
   unavailable = false;
+  /** What the server admits it can do. An older server simply omits things, so
+   *  a client newer than the server can say that out loud instead of failing
+   *  silently. */
+  features: string[] = [];
+
+  supports(feature: string): boolean {
+    return this.features.includes(feature);
+  }
 
   /** ws:// address derived from where the page came from. */
   get url(): string {
@@ -102,6 +110,7 @@ export class NetClient {
       switch (msg.type) {
         case 'welcome':
           this.selfId = String(msg.id ?? '');
+          this.features = Array.isArray(msg.features) ? (msg.features as string[]) : [];
           if (Array.isArray(msg.hall)) this.serverHall = msg.hall as HallEntry[];
           break;
         case 'joined':
@@ -122,6 +131,9 @@ export class NetClient {
         case 'relay':
           // Game modes talk to each other through this channel.
           for (const fn of this.relayListeners) fn(msg.payload, String(msg.id ?? ''));
+          break;
+        case 'race':
+          for (const fn of this.raceListeners) fn(msg.msg);
           break;
         default:
           break;
@@ -165,6 +177,19 @@ export class NetClient {
   relay(payload: unknown): void {
     this.send({ type: 'relay', payload });
   }
+
+  /** The race talks to the referee on its own channel rather than through
+   *  relay: the server has to read these, not just forward them. */
+  sendRace(msg: unknown): void {
+    this.send({ type: 'race', msg });
+  }
+
+  onRace(fn: (msg: unknown) => void): () => void {
+    this.raceListeners.add(fn);
+    return () => this.raceListeners.delete(fn);
+  }
+
+  private raceListeners = new Set<(msg: unknown) => void>();
 
   disconnect(): void {
     this.name = '';

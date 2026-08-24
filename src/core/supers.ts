@@ -10,6 +10,9 @@ export interface SuperDef {
   /** What it does to the opponent in versus modes. */
   pvp: string;
   duration: number;
+  /** How fast this one fills, against the standard rate. Everything charges at
+   *  the same pace unless a super has a reason not to. */
+  chargeMul?: number;
   /** Account level required to unlock. */
   unlockLevel: number;
 }
@@ -20,7 +23,7 @@ export const SUPERS: Record<SuperId, SuperDef> = {
     name: 'Плазменный залп',
     icon: '⁘',
     color: '#ff7a3d',
-    desc: 'Ракетка 5 секунд поливает поле плазмой, снося кирпичи рядами',
+    desc: 'Ракетка 5 секунд поливает поле плазмой; заряды прошивают неразрушимые кирпичи насквозь',
     pvp: 'Сопернику прилетает ряд мусорных кирпичей',
     duration: 5,
     unlockLevel: 1,
@@ -33,6 +36,9 @@ export const SUPERS: Record<SuperId, SuperDef> = {
     desc: 'Все мячи 8 секунд горят: прошивают кирпичи и бьют по площади',
     pvp: 'Мяч соперника разгоняется на 8 секунд',
     duration: 8,
+    // A quarter faster than the rest: the meteor is the one that keeps a race
+    // moving, and waiting for it took the pace out of a turn.
+    chargeMul: 1.25,
     unlockLevel: 1,
   },
   fracture: {

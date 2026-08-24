@@ -47,10 +47,15 @@ export const MAX_FRAME = 0.25; // never simulate more than this per rendered fra
 export const START_LIVES = 3;
 export const SERVE_DELAY = 0.55;
 
-/** Super strike energy. Filled by damage/combo, spent by the ultimate. */
+/** Super strike energy. Filled by damage/combo, spent by the ultimate.
+ *
+ *  Halved on Oleg's call: the bar was refilling faster than a level could use
+ *  it, so the super stopped being a moment and became a rhythm. What a capsule
+ *  or a perk hands over directly is untouched, which makes those pickups worth
+ *  more now that the drip is slower. */
 export const ENERGY_MAX = 100;
-export const ENERGY_PER_DAMAGE = 2.6;
-export const ENERGY_PER_POWERUP = 6;
+export const ENERGY_PER_DAMAGE = 1.3;
+export const ENERGY_PER_POWERUP = 3;
 
 export const COMBO_WINDOW = 1.6; // seconds to keep a combo alive
 export const COMBO_MAX = 12;

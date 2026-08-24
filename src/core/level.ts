@@ -1,6 +1,7 @@
 import { COLS, ROWS, BRICK_W, BRICK_H, GRID_LEFT, GRID_TOP } from './constants';
 import { BRICK_KINDS, EMPTY, isBrickCode, type Brick } from './bricks';
 import { BOSSES, type BossId } from './bosses';
+import { isPropKind, type LevelProp } from './props';
 
 export interface LevelData {
   id: string;
@@ -14,6 +15,9 @@ export interface LevelData {
   bg?: number;
   /** Boss guarding this level, if any. */
   boss?: BossId;
+  /** Pinball furniture in the upper rows: bumpers, slings, spinners and the
+   *  rest. They sit on the same grid as the bricks and replace them. */
+  props?: LevelProp[];
 }
 
 export function emptyRows(): string[] {
@@ -39,6 +43,18 @@ export function normalizeLevel(raw: unknown, fallbackId = 'custom'): LevelData |
   }
 
   const speed = typeof o.ballSpeed === 'number' && isFinite(o.ballSpeed) ? o.ballSpeed : 1;
+  const props: LevelProp[] = [];
+  if (Array.isArray(o.props)) {
+    for (const raw2 of o.props) {
+      const p = raw2 as Record<string, unknown>;
+      const kind = String(p?.kind ?? '');
+      const col = Number(p?.col);
+      const row = Number(p?.row);
+      if (!isPropKind(kind) || !Number.isInteger(col) || !Number.isInteger(row)) continue;
+      if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue;
+      props.push({ kind, col, row });
+    }
+  }
   return {
     id: typeof o.id === 'string' && o.id ? o.id : fallbackId,
     name: typeof o.name === 'string' && o.name ? o.name : 'Без названия',
@@ -47,6 +63,7 @@ export function normalizeLevel(raw: unknown, fallbackId = 'custom'): LevelData |
     ballSpeed: Math.min(Math.max(speed, 0.5), 2.5),
     bg: typeof o.bg === 'number' ? o.bg | 0 : 0,
     boss: typeof o.boss === 'string' && o.boss in BOSSES ? (o.boss as BossId) : undefined,
+    props: props.length ? props : undefined,
   };
 }
 
@@ -105,7 +122,22 @@ export function buildBricks(level: LevelData, cols = COLS, brickW = BRICK_W): Br
 }
 
 export function cloneLevel(level: LevelData): LevelData {
-  return { ...level, rows: level.rows.slice() };
+  return { ...level, rows: level.rows.slice(), props: level.props?.map((p) => ({ ...p })) };
+}
+
+/** Props for a field of `cols` columns. A co-op field is the level mirrored
+ *  outward, so its furniture is mirrored with it rather than left in one half. */
+export function widenProps(props: LevelProp[] | undefined, cols: number): LevelProp[] {
+  if (!props?.length) return [];
+  if (cols <= COLS) return props;
+  const out: LevelProp[] = [];
+  for (let block = 0; block * COLS < cols; block++) {
+    for (const p of props) {
+      const col = block % 2 === 0 ? block * COLS + p.col : block * COLS + (COLS - 1 - p.col);
+      if (col < cols) out.push({ ...p, col });
+    }
+  }
+  return out;
 }
 
 export function setCell(level: LevelData, col: number, row: number, ch: string): void {

@@ -33,7 +33,10 @@ import { ALL_ENTRIES, type StoryEntry } from '../core/story';
 import { net } from '../net/client';
 import { netVersusScene } from '../game/netVersus';
 import { raceScene } from '../game/race';
-import { RACE_DISTANCES, SEAT_KEY_LABELS } from '../core/race';
+import { pinballScene } from '../game/pinball';
+import { RACE_DISTANCES, SEAT_KEY_LABELS, TEAM_COLORS, TEAM_LABELS } from '../core/race';
+import { RaceNet } from '../game/raceNet';
+import type { RaceSeat } from '../net/raceProtocol';
 
 /** The menu is a canvas backdrop plus a DOM overlay; every screen swaps the
  *  overlay contents and leaves the animation running underneath. */
@@ -44,6 +47,16 @@ export function mainMenu(app: App): Scene {
   let renderSolo: (() => void) | null = null;
   /** Live subscription to the shared hall, dropped when leaving that screen. */
   let unsubscribe: (() => void) | null = null;
+  /** The race lobby's connection. Kept here so that re-entering the lobby never
+   *  leaves an older listener behind, still redrawing over whatever came next. */
+  let raceLobby: RaceNet | null = null;
+
+  function closeRaceLobby(): void {
+    raceLobby?.dispose();
+    raceLobby = null;
+    unsubscribe?.();
+    unsubscribe = null;
+  }
 
   const show = (...nodes: HTMLElement[]): void => {
     app.overlay.classList.add('interactive');
@@ -158,6 +171,18 @@ export function mainMenu(app: App): Scene {
             'Гонка',
             'Настолка на 2–6 игроков: кубик, червоточины, бафы и дебафы в чужой уровень',
             () => screenRace(),
+          ),
+          modeCard(
+            '🕹',
+            'Пинбол',
+            'Настоящий стол: гравитация, флипперы и плунжер, а кирпичи наверху',
+            () =>
+              app.setScene((a) =>
+                pinballScene(a, {
+                  levels: a.campaignLevels(),
+                  startIndex: Math.min(12, CAMPAIGN_SIZE - 1),
+                }),
+              ),
           ),
           modeCard('⚔️', 'Дуэль 1 на 1', 'Общее поле, две ракетки, счёт до 5 голов', () => screenVersus('duel')),
           modeCard('🪟', 'Раздельный экран', 'Два поля рядом, атаки мусорными кирпичами', () => screenVersus('split')),
@@ -433,6 +458,9 @@ export function mainMenu(app: App): Scene {
   function screenSolo(levels: LevelData[], title: string, opts: { campaign?: boolean; startIndex?: number } = {}): void {
     let chosen: SuperId = app.profile.favouriteSuper;
     if (!isSuperUnlocked(app.profile, chosen)) chosen = 'barrage';
+    /** Which physics these levels are played with. The same hundred fields work
+     *  either way; what changes is whether the ball falls. */
+    let field: 'paddle' | 'floors' | 'table' = 'paddle';
 
     const render = (): void => {
       renderSolo = render;
@@ -460,6 +488,48 @@ export function mainMenu(app: App): Scene {
                 `Внимание: новый забег перезапишет автосохранение (уровень ${app.profile.save.levelIndex + 1}). Чтобы вернуться к нему, выберите «Продолжить забег» в меню.`,
               )
             : null,
+          el('h3', { style: 'margin-top:18px' }, 'Поле'),
+          el(
+            'div',
+            { class: 'row', style: 'gap:6px' },
+            button(
+              '🎯 Ракетка',
+              () => {
+                field = 'paddle';
+                sfx.play('ui');
+                render();
+              },
+              `btn small${field === 'paddle' ? ' primary' : ''}`,
+            ),
+            button(
+              '🏚 Два этажа',
+              () => {
+                field = 'floors';
+                sfx.play('ui');
+                render();
+              },
+              `btn small${field === 'floors' ? ' primary' : ''}`,
+            ),
+            button(
+              '🕹 Стол',
+              () => {
+                field = 'table';
+                sfx.play('ui');
+                render();
+              },
+              `btn small${field === 'table' ? ' primary' : ''}`,
+            ),
+          ),
+          el(
+            'p',
+            { class: 'hint', style: 'margin:6px 0 0' },
+            field === 'paddle'
+              ? 'Классика: ракетка внизу, мяч летит с постоянной скоростью. Опыт, усиления, скиллы и суперудар — всё как обычно.'
+              : field === 'floors'
+                ? 'Верхний этаж — обычный арканоид с ракеткой. Мяч, ушедший мимо ракетки, не пропадает: он проваливается в пинбольный подвал, где работают гравитация, бамперы и два флиппера на тех же клавишах. Закинули обратно через потолок — играем дальше, жизнь цела.'
+                : 'Те же уровни на пинбольном столе: гравитация, два флиппера и плунжер. Аркадный счёт без опыта и скиллов — стол живёт по своим правилам.',
+          ),
+
           el(
             'div',
             { class: 'row', style: 'gap:26px;margin-top:18px;align-items:flex-start' },
@@ -523,16 +593,23 @@ export function mainMenu(app: App): Scene {
               'Начать',
               () =>
                 app.setScene((a) =>
-                  soloScene(a, {
-                    levels,
-                    superId: chosen,
-                    title,
-                    startIndex: opts.startIndex ?? 0,
-                    trackProgress: opts.campaign === true,
-                    lives: app.profile.lives,
-                    speed: app.profile.gameSpeed,
-                    ngPlus: opts.campaign ? app.profile.ngPlus : 0,
-                  }),
+                  field === 'table'
+                    ? pinballScene(a, {
+                        levels,
+                        startIndex: opts.startIndex ?? 0,
+                        balls: app.profile.lives,
+                      })
+                    : soloScene(a, {
+                        levels,
+                        superId: chosen,
+                        title,
+                        startIndex: opts.startIndex ?? 0,
+                        trackProgress: opts.campaign === true,
+                        lives: app.profile.lives,
+                        speed: app.profile.gameSpeed,
+                        basement: field === 'floors',
+                        ngPlus: opts.campaign ? app.profile.ngPlus : 0,
+                      }),
                 ),
               'btn primary',
             ),
@@ -551,6 +628,9 @@ export function mainMenu(app: App): Scene {
     const names: string[] = ['Игрок 1', 'Игрок 2', 'Игрок 3', 'Игрок 4', 'Игрок 5', 'Игрок 6'];
     names[0] = app.profile.name;
     let distance: number = RACE_DISTANCES[0];
+    /** Union per seat, null for a lone racer. Agreed before the match, because
+     *  over the network there is no table to lean across afterwards. */
+    const teams: (number | null)[] = [null, null, null, null, null, null];
 
     const render = (): void => {
       show(
@@ -561,12 +641,12 @@ export function mainMenu(app: App): Scene {
           el(
             'p',
             { class: 'hint' },
-            'Ходят по очереди на одном компьютере. Свой ход — короткий уровень; чужой — трансляция, в которую вы бросаете карты. Сначала уровень, потом кубик: d6 плюс то, что вы наиграли.',
+            'Ходят по очереди на одном компьютере. Свой ход — уровень против таймера, который только убывает; чужой — трансляция, в которую вы бросаете карты. После уровня — кубик: d6 плюс то, что вы наиграли.',
           ),
           el(
             'p',
             { class: 'hint' },
-            `Каждые 3–5 клеток — червоточина: прыжок вперёд, провал назад, рулетка, обмен местами или катапульта. На последней клетке ждёт DOH — только его смерть заканчивает гонку.`,
+            'Примерно каждая третья клетка что-то делает, но все они закрыты: прыжок, провал, рулетка, обмен местами, аптечка, госпиталь, хронометр, тайник, обрыв в самое начало и реверс порядка ходов. Клетка открывается, когда на неё встали, и дальше светится для всех. На последней ждёт DOH — только его смерть заканчивает гонку.',
           ),
 
           el('h3', { style: 'margin-top:16px' }, 'Игроки'),
@@ -590,19 +670,72 @@ export function mainMenu(app: App): Scene {
             { class: 'grid c3', style: 'margin-top:10px' },
             ...names.slice(0, count).map((n, i) =>
               el(
-                'label',
-                { class: 'field' },
-                `Место ${i + 1} · клавиши ${SEAT_KEY_LABELS[i].join(' ')}`,
-                el('input', {
-                  type: 'text',
-                  value: n,
-                  oninput: (e: Event) => {
-                    names[i] = (e.target as HTMLInputElement).value || `Игрок ${i + 1}`;
-                  },
-                }),
+                'div',
+                {},
+                el(
+                  'label',
+                  { class: 'field' },
+                  `Место ${i + 1} · клавиши ${SEAT_KEY_LABELS[i].join(' ')}`,
+                  el('input', {
+                    type: 'text',
+                    value: n,
+                    oninput: (e: Event) => {
+                      names[i] = (e.target as HTMLInputElement).value || `Игрок ${i + 1}`;
+                    },
+                  }),
+                ),
+                el(
+                  'div',
+                  { class: 'row', style: 'gap:4px;margin-top:6px' },
+                  button(
+                    'сам за себя',
+                    () => {
+                      teams[i] = null;
+                      sfx.play('ui');
+                      render();
+                    },
+                    `btn small${teams[i] === null ? ' primary' : ' ghost'}`,
+                  ),
+                  ...TEAM_LABELS.map((label, t) =>
+                    button(
+                      label,
+                      () => {
+                        // Three to a union: more than that and the race becomes
+                        // two blocks staring at each other.
+                        if (teams[i] !== t && teams.filter((x) => x === t).length >= 3) return;
+                        teams[i] = t;
+                        sfx.play('ui');
+                        render();
+                      },
+                      `btn small${teams[i] === t ? ' primary' : ' ghost'}`,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
+
+          el(
+            'p',
+            { class: 'hint', style: 'margin-top:10px' },
+            'Союз: до трёх мест под одной буквой. Союзники не бьют друг друга, делятся картами за зачистку и могут передавать собранные жизни, а победа одного засчитывается всем. Союзы можно собрать и по ходу партии, но здесь — заранее.',
+          ),
+          teams.some((t) => t !== null)
+            ? el(
+                'div',
+                { class: 'row', style: 'gap:8px;margin-top:6px' },
+                ...TEAM_LABELS.map((label, t) => {
+                  const members = names.slice(0, count).filter((_, i) => teams[i] === t);
+                  return members.length
+                    ? el(
+                        'span',
+                        { class: 'pill', style: `border-color:${TEAM_COLORS[t]};color:${TEAM_COLORS[t]}` },
+                        `Союз ${label}: ${members.join(' + ')}`,
+                      )
+                    : null;
+                }).filter((x): x is HTMLElement => x !== null),
+              )
+            : null,
 
           el('h3', { style: 'margin-top:16px' }, 'Дистанция'),
           el(
@@ -630,20 +763,28 @@ export function mainMenu(app: App): Scene {
           el(
             'p',
             { class: 'hint', style: 'margin-top:0' },
-            'Три карты на руках, по клавише на каждую. Сыгранная карта возвращается через 7 секунд — за один ход всё не выложить. Тот, кто играет, жмёт R и один раз за ход отбивает входящую карту, но влияние с бросавшего всё равно спишется.',
+            'Карты не респаунятся: их ловят на своём уровне (капсула ★) и получают за зачистку, а потом тратят в чужие ходы. Первые три из запаса лежат на ваших клавишах. Самые дорогие — «+10 / +15 секунд» союзнику и «−10 / −15» врагу: таймер идёт вниз, и секунды решают. Тот, кто играет, жмёт R и один раз за ход отбивает входящую карту — карта бросавшего сгорает всё равно.',
           ),
 
           el(
             'div',
             { class: 'row', style: 'margin-top:20px' },
+            net.status === 'online'
+              ? button(
+                  net.supports('race') ? 'Гонка по сети' : 'Гонка по сети (сервер старый)',
+                  () => screenRaceLobby(names.slice(0, count), teams.slice(0, count), distance),
+                  `btn${net.supports('race') ? '' : ' ghost'}`,
+                )
+              : null,
             button(
               'Начать гонку',
               () =>
                 app.setScene((a) =>
                   raceScene(a, {
                     names: names.slice(0, count),
+                    teams: teams.slice(0, count),
                     distance,
-                    levels: a.campaignLevels(),
+                    levels: a.raceLevels(),
                     superId: a.profile.favouriteSuper,
                     speed: a.profile.gameSpeed,
                   }),
@@ -655,6 +796,227 @@ export function mainMenu(app: App): Scene {
         ),
       );
     };
+    render();
+  }
+
+  // ----------------------------------------------------------- race lobby --
+
+  /** Seats, not computers: this laptop claims one seat per person sitting at
+   *  it, so a team of three round one screen and six people on six screens are
+   *  the same thing to the referee. */
+  function screenRaceLobby(initialNames: string[], initialTeams: (number | null)[], distance: number): void {
+    let seats: RaceSeat[] = [];
+    let hostId = '';
+    let count = Math.max(1, initialNames.length);
+    const names = [...initialNames, 'Игрок 5', 'Игрок 6'];
+    const teams = [...initialTeams, null, null];
+    let chosenDistance = distance;
+
+    raceLobby?.dispose();
+    const lobby = new RaceNet({
+      lobby: (list, host) => {
+        seats = list;
+        hostId = host;
+        render();
+      },
+      started: (seed, dist, list) => {
+        // Hand over cleanly: the lobby must stop listening before the race
+        // scene appears, or its next redraw paints straight over the game.
+        closeRaceLobby();
+        const mySeats = list.filter((s) => s.owner === net.selfId).map((s) => s.seat);
+        app.setScene((a) =>
+          raceScene(a, {
+            names: list.map((s) => s.name),
+            teams: list.map((s) => s.team),
+            distance: dist,
+            levels: a.raceLevels(),
+            superId: a.profile.favouriteSuper,
+            speed: a.profile.gameSpeed,
+            net: { seed, mySeats },
+          }),
+        );
+      },
+    });
+
+    raceLobby = lobby;
+
+    const claim = (): void => {
+      lobby.claim(names.slice(0, count).map((name, i) => ({ name, team: teams[i] ?? null })));
+    };
+    claim();
+
+    const leave = (): void => {
+      lobby.leave();
+      closeRaceLobby();
+      screenMain();
+    };
+
+    const render = (): void => {
+      const mine = seats.filter((s) => s.owner === net.selfId);
+      // Anyone sitting at the table may set the distance and start it. Tying
+      // that to a single "host" only produced rooms where nobody could begin
+      // because the host had reconnected and become somebody else.
+      const seated = mine.length > 0;
+      const hostName = seats.find((s) => s.owner === hostId)?.name ?? '';
+
+      show(
+        el(
+          'div',
+          { class: 'screen' },
+          el('h2', {}, '🎲 Гонка по сети'),
+          net.supports('race')
+            ? null
+            : el(
+                'p',
+                { class: 'hint', style: 'color:var(--pink);font-weight:700' },
+                'Сервер комнат старой версии — он не знает про гонку, поэтому стол останется пустым. Перезапустите его: остановите старый запуск (Ctrl+C или `lsof -ti tcp:8080 | xargs kill`) и снова `npm run lan`.',
+              ),
+          el(
+            'p',
+            { class: 'hint' },
+            `Комната: ${net.shareUrl} · подключено ${net.peers.length}. Место — это человек, а не компьютер: за одним ноутбуком можно занять несколько мест, каждое со своим рядом клавиш.`,
+          ),
+
+          el('h3', { style: 'margin-top:14px' }, 'Мест за этим компьютером'),
+          el(
+            'div',
+            { class: 'row', style: 'gap:6px' },
+            ...[1, 2, 3].map((n) =>
+              button(
+                String(n),
+                () => {
+                  count = n;
+                  claim();
+                  sfx.play('ui');
+                  render();
+                },
+                `btn small${count === n ? ' primary' : ''}`,
+              ),
+            ),
+          ),
+          el(
+            'div',
+            { class: 'grid c3', style: 'margin-top:10px' },
+            ...names.slice(0, count).map((n, i) =>
+              el(
+                'div',
+                {},
+                el(
+                  'label',
+                  { class: 'field' },
+                  `Место ${i + 1} · клавиши ${SEAT_KEY_LABELS[i].join(' ')}`,
+                  el('input', {
+                    type: 'text',
+                    value: n,
+                    oninput: (e: Event) => {
+                      names[i] = (e.target as HTMLInputElement).value || `Игрок ${i + 1}`;
+                      claim();
+                    },
+                  }),
+                ),
+                el(
+                  'div',
+                  { class: 'row', style: 'gap:4px;margin-top:6px' },
+                  button(
+                    'сам за себя',
+                    () => {
+                      teams[i] = null;
+                      claim();
+                      render();
+                    },
+                    `btn small${teams[i] === null ? ' primary' : ' ghost'}`,
+                  ),
+                  ...TEAM_LABELS.map((label, t) =>
+                    button(
+                      label,
+                      () => {
+                        teams[i] = t;
+                        claim();
+                        render();
+                      },
+                      `btn small${teams[i] === t ? ' primary' : ' ghost'}`,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          el('h3', { style: 'margin-top:16px' }, `За столом: ${seats.length}`),
+          el(
+            'div',
+            { class: 'row', style: 'gap:8px' },
+            ...(seats.length
+              ? seats.map((s) =>
+                  el(
+                    'span',
+                    {
+                      class: 'pill',
+                      style: s.team !== null ? `border-color:${TEAM_COLORS[s.team]};color:${TEAM_COLORS[s.team]}` : '',
+                    },
+                    `${s.seat + 1}. ${s.name}${s.team !== null ? ` · союз ${TEAM_LABELS[s.team]}` : ''}${s.owner === net.selfId ? ' · вы' : ''}`,
+                  ),
+                )
+              : [el('span', { class: 'hint' }, 'Пока никого')]),
+          ),
+
+          seated
+            ? el(
+                'div',
+                {},
+                el('h3', { style: 'margin-top:16px' }, 'Дистанция'),
+                el(
+                  'div',
+                  { class: 'row', style: 'gap:6px' },
+                  ...RACE_DISTANCES.map((d) =>
+                    button(
+                      d === 20 ? '20 · блиц' : d === 50 ? '50 · стандарт' : '100 · полная',
+                      () => {
+                        chosenDistance = d;
+                        sfx.play('ui');
+                        render();
+                      },
+                      `btn small${chosenDistance === d ? ' primary' : ''}`,
+                    ),
+                  ),
+                ),
+              )
+            : el('p', { class: 'hint', style: 'margin-top:16px' }, 'Займите место, чтобы участвовать: пока вы зритель.'),
+
+          el(
+            'p',
+            { class: 'hint', style: 'margin-top:10px' },
+            'Состав замирает на старте: кто не успел — смотрит. Пока играет один, остальные видят его поле и бросают в него свои карты.',
+          ),
+
+          el(
+            'div',
+            { class: 'row', style: 'margin-top:18px' },
+            seated
+              ? button(
+                  seats.length >= 2 ? 'Начать гонку' : 'Нужно хотя бы двое',
+                  () => {
+                    if (seats.length >= 2) lobby.start(chosenDistance);
+                  },
+                  `btn primary${seats.length >= 2 ? '' : ' ghost'}`,
+                )
+              : el('span', { class: 'hint' }, hostName ? `За столом уже ${seats.length}. Первым сел ${hostName}` : 'Стол пуст'),
+            button('Выйти', leave, 'btn ghost'),
+          ),
+        ),
+      );
+    };
+
+    // Peers joining and leaving redraw the room; a reconnect also has to take
+    // the seats back, since the server dropped them with the old socket.
+    let wasOnline = net.status === 'online';
+    unsubscribe?.();
+    unsubscribe = net.subscribe(() => {
+      const nowOnline = net.status === 'online';
+      if (nowOnline && !wasOnline) claim();
+      wasOnline = nowOnline;
+      render();
+    });
     render();
   }
 
@@ -1318,6 +1680,8 @@ export function mainMenu(app: App): Scene {
       backdrop.draw(ctx, w, h);
     },
     dispose() {
+      // Whatever screen we were on stops talking to the network with us.
+      closeRaceLobby();
       app.overlay.replaceChildren();
       app.overlay.classList.remove('interactive');
     },

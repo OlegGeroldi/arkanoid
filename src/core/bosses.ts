@@ -7,7 +7,9 @@ export interface BossDef {
   hp: number;
   /** Horizontal speed, px/s. */
   speed: number;
-  /** Seconds between shots in phase 2. */
+  /** Seconds between shots in phase 2. Doubled across the roster on Oleg's
+   *  call: the bosses were laying down more fire than a two-life turn can
+   *  survive, and the fight is meant to be about the shield, not dodging. */
   fireRate: number;
   /** Body size. */
   w: number;
@@ -20,6 +22,12 @@ export interface BossDef {
   pushesFromStart: boolean;
   /** Seconds between row pushes once pushing has begun. */
   pushEvery: number;
+  /** Once, at low health, snatches a ball out of play and holds it. Only the
+   *  last boss does this: it is the fight's one moment of helplessness. */
+  grabsBall?: boolean;
+  /** Its shield hangs on a handful of marked cells rather than on the whole
+   *  field: you hunt five bricks instead of clearing a hundred. */
+  nodeShield?: boolean;
   /** How this one behaves, for the intro line. */
   gimmick: string;
 }
@@ -33,7 +41,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#4de2ff',
     hp: 40,
     speed: 70,
-    fireRate: 1.6,
+    fireRate: 3.2,
     w: 120,
     h: 44,
     taunt: 'Периметр закрыт',
@@ -48,7 +56,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#3ddc84',
     hp: 60,
     speed: 130,
-    fireRate: 1.05,
+    fireRate: 2.1,
     w: 104,
     h: 40,
     taunt: 'Сеть уже сплетена',
@@ -64,7 +72,7 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#b06bff',
     hp: 95,
     speed: 55,
-    fireRate: 0.85,
+    fireRate: 1.7,
     w: 150,
     h: 52,
     taunt: 'Реактор не остановить',
@@ -79,14 +87,16 @@ export const BOSSES: Record<BossId, BossDef> = {
     color: '#ff4d6d',
     hp: 150,
     speed: 105,
-    fireRate: 0.65,
+    fireRate: 1.3,
     w: 168,
     h: 60,
     taunt: 'Ты дошёл слишком далеко',
-    shielded: false,
+    shielded: true,
+    nodeShield: true,
     pushesFromStart: true,
     pushEvery: 6,
-    gimmick: 'Ни щита, ни пощады: залпы и ряды без перерыва',
+    grabsBall: true,
+    gimmick: 'Щит на энергоузлах, залпы без перерыва и захват мяча на исходе',
   },
 };
 

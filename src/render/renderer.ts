@@ -69,6 +69,7 @@ export function drawArena(
 
   drawBackground(ctx, arena, t);
   drawBricks(ctx, arena);
+  drawProps(ctx, arena, t);
   drawBoss(ctx, arena, t);
   drawSuperVisuals(ctx, arena, t);
   drawPowerups(ctx, arena);
@@ -184,6 +185,19 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
         ctx.fillRect(x + w - 5 - i * 4, y + h - 4, 2.5, 2.5);
       }
     }
+    if (b.kind.code === 'k') {
+      // An energy node has to be findable at a glance: it is the only thing on
+      // the field that matters while the shield is up.
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.32, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (b.kind.code === 'x') {
       ctx.strokeStyle = 'rgba(255,255,255,0.18)';
       ctx.beginPath();
@@ -198,6 +212,104 @@ function drawBricks(ctx: CanvasRenderingContext2D, arena: Arena): void {
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, 3);
       ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/** The pinball attic. Each piece has to read as what it does at a glance: a
+ *  bumper as something that will throw the ball back, a spinner as something to
+ *  shoot through, a dropped target as gone. */
+function drawProps(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void {
+  for (const p of arena.props) {
+    const { def } = p;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+
+    if (p.kind === 'target' && p.down) {
+      // Knocked down: a scar where it was, so the set can still be counted.
+      ctx.strokeStyle = withAlpha(def.color, 0.25);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-6, 0);
+      ctx.lineTo(6, 0);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
+    const glow = 0.55 + p.flash * 0.45;
+    ctx.shadowColor = def.color;
+    ctx.shadowBlur = 10 + p.flash * 22;
+
+    switch (p.kind) {
+      case 'bumper': {
+        ctx.fillStyle = withAlpha(def.color, 0.18 + p.flash * 0.5);
+        ctx.beginPath();
+        ctx.arc(0, 0, def.radius + p.flash * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.fillStyle = withAlpha('#ffffff', 0.5 + p.flash * 0.5);
+        ctx.beginPath();
+        ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'sling': {
+        // A wedge pointing away from the centre, which is where it throws.
+        const dir = p.x < arena.width / 2 ? 1 : -1;
+        ctx.fillStyle = withAlpha(def.color, 0.2 + p.flash * 0.5);
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-def.radius * dir, -def.radius);
+        ctx.lineTo(def.radius * dir, 0);
+        ctx.lineTo(-def.radius * dir, def.radius);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        break;
+      }
+      case 'spinner': {
+        ctx.rotate(p.spin);
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-def.radius, 0);
+        ctx.lineTo(def.radius, 0);
+        ctx.stroke();
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.arc(0, 0, def.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case 'target': {
+        ctx.fillStyle = withAlpha(def.color, 0.25 + p.flash * 0.5);
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-def.radius, -5, def.radius * 2, 10, 3);
+        ctx.fill();
+        ctx.stroke();
+        break;
+      }
+      case 'lock': {
+        // A hole, drawn as one: dark inside, ringed outside, and lit while it
+        // is holding something.
+        ctx.fillStyle = p.holdT > 0 ? withAlpha(def.color, 0.45) : 'rgba(4,7,16,0.9)';
+        ctx.beginPath();
+        ctx.arc(0, 0, def.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = withAlpha(def.color, glow);
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 4]);
+        ctx.lineDashOffset = -t * 12;
+        ctx.stroke();
+        break;
+      }
     }
     ctx.restore();
   }
@@ -422,6 +534,34 @@ function drawBoss(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void 
   ctx.beginPath();
   ctx.arc(boss.x + Math.sin(t * 2) * eyeR * 0.5, eyeY, eyeR * 0.45, 0, Math.PI * 2);
   ctx.fill();
+
+  // While it holds a ball, a claw of light runs from the body to the captured
+  // ball with a countdown ring: the player must be able to see what has it and
+  // for how long, or losing the rally reads as the game breaking.
+  if (boss.grabT > 0) {
+    const held = arena.balls.find((b) => b.captured);
+    if (held) {
+      const left = boss.grabT / 5;
+      ctx.save();
+      ctx.strokeStyle = '#ff2d55';
+      ctx.lineWidth = 2 + Math.sin(t * 18) * 0.8;
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.arc(held.x, held.y, 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+      ctx.stroke();
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(boss.x, boss.y + def.h / 2);
+      ctx.lineTo(held.x, held.y);
+      ctx.stroke();
+      ctx.fillStyle = '#ff2d55';
+      ctx.font = `800 12px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(`${boss.grabT.toFixed(1)}`, held.x, held.y - 24);
+      ctx.restore();
+    }
+  }
 
   if (boss.hitFlash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${boss.hitFlash * 0.5})`;
@@ -709,6 +849,10 @@ export interface HudOptions {
   subtitle?: string;
   /** Current frame rate — shown so a slowdown is visible, not guessed at. */
   fps?: number;
+  /** Replaces the count-up level timer with a countdown. The race runs on a
+   *  deadline, and a number that grows reads as the opposite of one that is
+   *  running out — the whole point of the cards that buy seconds. */
+  countdown?: { label: string; seconds: number };
 }
 
 export function drawHud(
@@ -855,15 +999,31 @@ export function drawHud(
   }
 
   // Level timer: informative only — it feeds the end-of-level score bonus.
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.font = `600 11px ${FONT}`;
-  ctx.fillText('ВРЕМЯ УРОВНЯ', pad, cy);
-  ctx.fillStyle = '#ffd24d';
-  ctx.font = `700 13px ${FONT}`;
-  ctx.textAlign = 'right';
-  ctx.fillText(formatTime(arena.levelTime), w - pad, cy);
-  ctx.textAlign = 'left';
-  cy += 22;
+  // A countdown, where one is given, takes its place and is drawn large: in the
+  // race it is the thing the whole turn is fighting against.
+  if (opt.countdown) {
+    const left = Math.max(0, opt.countdown.seconds);
+    const low = left <= 15;
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText(opt.countdown.label, pad, cy);
+    ctx.fillStyle = low ? '#ff4d6d' : '#3ddc84';
+    ctx.font = `800 26px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(formatTime(left), w - pad, cy + 8);
+    ctx.textAlign = 'left';
+    cy += 34;
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillText('ВРЕМЯ УРОВНЯ', pad, cy);
+    ctx.fillStyle = '#ffd24d';
+    ctx.font = `700 13px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(formatTime(arena.levelTime), w - pad, cy);
+    ctx.textAlign = 'left';
+    cy += 22;
+  }
 
   // Score + combo
   ctx.fillStyle = '#ffffff';

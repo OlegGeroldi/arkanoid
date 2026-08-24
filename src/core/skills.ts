@@ -31,6 +31,9 @@ export interface SkillDef {
   ranks: [string, string];
   /** Specialisation this skill belongs to; its school offers it more readily. */
   school?: SpecId;
+  /** Starts each level on cooldown instead of ready. The strongest openers
+   *  should be earned inside the level rather than fired in its first second. */
+  warmup?: boolean;
 }
 
 export const SKILLS: Record<SkillId, SkillDef> = {
@@ -43,6 +46,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
     cooldown: 60,
     duration: 5,
     unlockLevel: 1,
+    warmup: true,
     ranks: ['+3 секунды действия', 'притяжение вдвое сильнее'],
     school: 'warden',
   },
@@ -54,6 +58,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
     desc: 'Выстрел, прошивающий колонну кирпичей насквозь',
     cooldown: 60,
     unlockLevel: 1,
+    warmup: true,
     ranks: ['тройной урон и шире след', 'ломает даже неразрушимые блоки'],
     school: 'gunner',
   },
@@ -185,8 +190,13 @@ export const SKILLS: Record<SkillId, SkillDef> = {
 export const SKILL_LIST: SkillDef[] = Object.values(SKILLS);
 
 /** Cooldown at a given rank: each rank past the first trims 15%. */
+/** Global cooldown scale. Halved on Oleg's call: abilities that come round once
+ *  a minute were being carried unused into the next level, and in a race turn of
+ *  75 seconds a 60-second skill fired at most once. */
+export const COOLDOWN_SCALE = 0.5;
+
 export const skillCooldown = (def: SkillDef, rank: number): number =>
-  def.cooldown * Math.pow(0.85, Math.max(0, rank - 1));
+  def.cooldown * COOLDOWN_SCALE * Math.pow(0.85, Math.max(0, rank - 1));
 
 /** Duration at a given rank: rank II adds a flat bonus, rank III keeps it. */
 export function skillDuration(def: SkillDef, rank: number): number {

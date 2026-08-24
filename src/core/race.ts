@@ -4,9 +4,12 @@ import type { PowerupId } from './powerups';
 import type { Rng } from './rng';
 
 /** The board-game race: everybody runs the same campaign, but as a track. You
- *  play a short level, roll, move — and while you play, everyone else spends
- *  influence on helping or wrecking you. This module is the rules only: no DOM,
- *  no canvas, no arena. The scene owns those. */
+ *  play a short level against a countdown, roll, move — and while you play, the
+ *  others throw cards they earned in their own turns.
+ *
+ *  This module is the rules only: no DOM, no canvas, no arena. That is also
+ *  what the networked version will send over the wire — the whole race state is
+ *  a few numbers per player plus one byte per cell, so watchers stay cheap. */
 
 export const RACE_DISTANCES = [20, 50, 100] as const;
 export type RaceDistance = (typeof RACE_DISTANCES)[number];
@@ -14,72 +17,230 @@ export type RaceDistance = (typeof RACE_DISTANCES)[number];
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;
 
-/** Seconds a normal turn lasts, and the longer leash a boss cell gets. */
+/** Seconds a turn starts with, and the longer leash a boss cell gets. The clock
+ *  only ever runs down; cards are how you buy it back. */
 export const TURN_SECONDS = 75;
 export const BOSS_TURN_SECONDS = 130;
-export const TURN_LIVES = 2;
-export const BOSS_TURN_LIVES = 3;
+/** Lives are a stock, not an allowance: what you finish a turn with is what
+ *  you start the next one with. That makes a medkit worth landing on, a stolen
+ *  life worth resenting, and a life handed to an ally a real sacrifice. */
+export const RACE_START_LIVES = 3;
+/** Nobody is ever eliminated: a turn always opens with at least this many. */
+export const MIN_TURN_LIVES = 1;
+/** A boss turn lends one extra life on top of the stock, and hands it back. */
+export const BOSS_LIVES_BONUS = 1;
 
-/** Cards land instantly, so a hand that never runs dry would let one player
- *  bury the runner. A played slot stays empty this long before it refills. */
-export const CARD_REDRAW = 7;
+/** Cards are earned, never regenerated: you catch them at your own paddle and
+ *  spend them on other people's turns. Three of them sit on your keys; the rest
+ *  wait in reserve. */
 export const HAND_SIZE = 3;
+export const START_CARDS = 5;
+/** Seconds a slot takes to recharge after it fires. The wait is not dead time:
+ *  while a slot is recharging its key changes job and leafs through the reserve,
+ *  so you choose what it will hold next. Ready, the same key throws. */
+export const CARD_COOLDOWN = 6;
+export const STOCK_MAX = 12;
+export const CLEAR_CARDS = 2;
+export const BOSS_CLEAR_CARDS = 3;
+/** An ally's clear pays every teammate a card — the standing perk of a union. */
+export const ALLY_CARDS = 1;
 
-/** Failing the mega-boss throws you back this far — the race stays open until
- *  somebody actually kills it. */
+/** Letters shown for teams. Six seats can split at most three ways and still
+ *  be a race rather than a duel of blocks. */
+export const TEAM_LABELS = ['A', 'B', 'C'];
+export const TEAM_COLORS = ['#4de2ff', '#ff5fa2', '#3ddc84'];
+
 export const FINALE_KNOCKBACK = 5;
 
 // ------------------------------------------------------------------ board ---
 
-export type WormholeKind = 'leap' | 'pit' | 'roulette' | 'swap' | 'spring';
+export type CellKind =
+  | 'leap'
+  | 'pit'
+  | 'roulette'
+  | 'swap'
+  | 'spring'
+  | 'medkit'
+  | 'hospital'
+  | 'clock'
+  | 'stash'
+  | 'start'
+  | 'reverse'
+  | 'toll'
+  | 'skip'
+  | 'rewind'
+  | 'steal'
+  | 'charge';
 
-export interface WormholeDef {
-  kind: WormholeKind;
+export interface CellDef {
+  kind: CellKind;
   name: string;
   icon: string;
   color: string;
   desc: string;
+  /** Relative frequency on the board. */
+  weight: number;
 }
 
-export const WORMHOLES: Record<WormholeKind, WormholeDef> = {
-  leap: { kind: 'leap', name: 'Прыжок', icon: '➤', color: '#3ddc84', desc: 'Бросает вперёд на 3-8 клеток' },
-  pit: { kind: 'pit', name: 'Провал', icon: '▼', color: '#ff4d6d', desc: 'Отбрасывает на 2-5 клеток назад' },
-  roulette: { kind: 'roulette', name: 'Рулетка', icon: '◆', color: '#ffd24d', desc: 'Далеко вперёд или далеко назад' },
-  swap: { kind: 'swap', name: 'Обмен', icon: '⇄', color: '#b06bff', desc: 'Меняет вас местами с ближайшим игроком' },
-  spring: {
-    kind: 'spring',
-    name: 'Катапульта',
-    icon: '⇑',
-    color: '#4de2ff',
-    desc: 'Дальний бросок, но следующий уровень начнётся с помехой',
-  },
+/** Every special cell is face down until somebody lands on it. Once it fires it
+ *  stays lit for the rest of the match, for everyone — so the board fills with
+ *  known ground, and the dice modifiers on the cards start to mean something:
+ *  when you can see the pit at 17, rolling a 4 instead of a 5 is worth buying. */
+export const CELL_TYPES: Record<CellKind, CellDef> = {
+  leap: { kind: 'leap', name: 'Прыжок', icon: '➤', color: '#3ddc84', desc: 'Бросает вперёд на 3–8 клеток', weight: 3 },
+  pit: { kind: 'pit', name: 'Провал', icon: '▼', color: '#ff4d6d', desc: 'Отбрасывает на 2–5 клеток назад', weight: 3 },
+  roulette: { kind: 'roulette', name: 'Рулетка', icon: '◆', color: '#ffd24d', desc: 'Далеко вперёд или далеко назад', weight: 2 },
+  swap: { kind: 'swap', name: 'Обмен', icon: '⇄', color: '#b06bff', desc: 'Меняет вас местами с ближайшим игроком', weight: 1 },
+  spring: { kind: 'spring', name: 'Катапульта', icon: '⇑', color: '#4de2ff', desc: 'Дальний бросок, но следующий уровень начнётся с помехой', weight: 1 },
+  medkit: { kind: 'medkit', name: 'Аптечка', icon: '♥', color: '#ff5fa2', desc: '+1 жизнь на следующий ход', weight: 3 },
+  hospital: { kind: 'hospital', name: 'Госпиталь', icon: '✚', color: '#ff8fc4', desc: '+3 жизни на следующий ход', weight: 1 },
+  clock: { kind: 'clock', name: 'Хронометр', icon: '⏱', color: '#8ef0ff', desc: '+30 секунд к следующему ходу', weight: 2 },
+  stash: { kind: 'stash', name: 'Тайник', icon: '🎁', color: '#ffd24d', desc: 'Две карты в запас', weight: 2 },
+  start: { kind: 'start', name: 'Обрыв', icon: '⏮', color: '#ff2d55', desc: 'В самое начало трассы', weight: 1 },
+  reverse: { kind: 'reverse', name: 'Реверс', icon: '🔄', color: '#c46bff', desc: 'Порядок ходов переворачивается до конца матча', weight: 1 },
+  toll: { kind: 'toll', name: 'Мытарь', icon: '⌛', color: '#9fb3c8', desc: '−20 секунд на следующем ходу', weight: 2 },
+  skip: { kind: 'skip', name: 'Карантин', icon: '⏸', color: '#ff7a3d', desc: 'Следующий ход вы пропускаете', weight: 2 },
+  rewind: { kind: 'rewind', name: 'Откат смены', icon: '↩', color: '#8ef0ff', desc: 'Ходит снова тот, кто ходил до вас', weight: 2 },
+  steal: { kind: 'steal', name: 'Изъятие', icon: '♡', color: '#ff2d55', desc: 'Забирает жизнь у самого богатого — если у него больше одной', weight: 2 },
+  charge: { kind: 'charge', name: 'Перегрузка', icon: '⚡', color: '#b06bff', desc: 'Следующий уровень начнётся с заряженным супером', weight: 2 },
 };
+
+/** Every cell says something when it fires. The station has been running on
+ *  bad paperwork and worse management for a century, and its signage has the
+ *  tone to match. */
+export const CELL_LINES: Record<CellKind, string[]> = {
+  leap: [
+    'Транспортный контур: «пассажир доставлен досрочно». Жалобы не принимаются.',
+    'Вас протолкнуло вперёд. Табличка внизу: «это была услуга, счёт придёт позже».',
+    'Ускоритель сработал штатно. Впервые за сорок лет.',
+  ],
+  pit: [
+    'Пол оказался предложением, а не обязательством.',
+    'Секция обслуживания приветствует вас. Вы уже были здесь. Вы будете здесь снова.',
+    'Диспетчер: «отставание на несколько клеток укрепляет характер».',
+  ],
+  roulette: [
+    'Генератор случайностей исправен и абсолютно к вам равнодушен.',
+    'Отдел вероятностей рассмотрел вашу заявку. Решение окончательное.',
+    'Монетка встала на ребро, потом передумала.',
+  ],
+  swap: [
+    'Кадровая ротация. Ваши вещи уже там, ваше место уже занято.',
+    'Вас поменяли местами. Заявление об этом писать не нужно, оно уже подано за вас.',
+    'Администрация считает, что вам двоим полезно посмотреть на жизнь друг друга.',
+  ],
+  spring: [
+    'Катапульта отработала. Медицинский отсек предупреждён.',
+    'Отличный полёт! Счёт за перегрузку придёт на следующем уровне.',
+    'Вас выстрелили вперёд. Побочные эффекты: помехи, тошнота, чувство долга.',
+  ],
+  medkit: [
+    'Аптечка. Срок годности истёк, но работает лучше, чем инструкция к ней.',
+    'Одна жизнь зачислена на ваш счёт. Условия обслуживания могут измениться.',
+    'Медотсек: «вы выглядите ужасно. Возьмите ещё одну».',
+  ],
+  hospital: [
+    'Полный курс лечения. Анестезия не входит в тариф.',
+    'Три жизни. Медотсек просит не спрашивать, у кого их взяли.',
+    'Диагноз: живой. Лечение: избыточное.',
+  ],
+  clock: [
+    'Хронометр подкручен в вашу пользу. Отдел учёта времени этого не заметил.',
+    'Тридцать секунд из фонда неиспользованных перерывов.',
+    'Время найдено в диване профсоюза и выдано вам.',
+  ],
+  stash: [
+    'Тайник предыдущего арендатора. Он не вернётся.',
+    'Две карты и записка: «удачи, она вам понадобится».',
+    'Найдено в вентиляции. Не спрашивайте.',
+  ],
+  start: [
+    'Ошибка в документах: ваш пропуск аннулирован. Начните сначала.',
+    'Обрыв. Отдел кадров рад видеть вас снова на входе.',
+    'Система решила, что предыдущие ваши достижения были черновиком.',
+  ],
+  reverse: [
+    'Приказ о порядке очерёдности отменён встречным приказом.',
+    'Реверс. Все идут в другую сторону и делают вид, что так и планировалось.',
+    'Кто-то повернул стрелку. Кто-то всегда поворачивает стрелку.',
+  ],
+  toll: [
+    'Мытарь взял своё. Квитанция — минус двадцать секунд.',
+    'С вас удержано время. Основание: пункт, который вы не читали.',
+    'Пошлина за проход. Наличными не берут, берут секундами.',
+  ],
+  skip: [
+    'Карантин. Вы совершенно здоровы, но бланк уже подписан.',
+    'Ваш следующий ход перенесён в архив. Архив не выдаёт обратно.',
+    'Профилактические работы. Работают все, кроме вас.',
+  ],
+  rewind: [
+    'Смена откачена: ходит снова тот, кто только что закончил. Ему сообщили.',
+    'Табельный аппарат заело. Предыдущий работник возвращается на пост.',
+    'Отдел кадров признал прошлый ход неполным. Повторить.',
+  ],
+  steal: [
+    'Изъятие в пользу нуждающегося. Нуждающийся — вы.',
+    'Одна жизнь переведена со счёта лидера. Он извещён. Он недоволен.',
+    'Перераспределение ресурсов. Всё законно, подпись неразборчива.',
+  ],
+  charge: [
+    'Реактор перегружен, но в хорошем смысле. Супер заряжен полностью.',
+    'Энергощит зарядили из чужого лимита. Кто-то останется без чайника.',
+    'Плазма готова. Инструкция по технике безопасности утеряна.',
+  ],
+};
+
+export function cellLine(kind: CellKind, rng: Rng): string {
+  return rng.pick(CELL_LINES[kind]);
+}
+
+export const CELL_LIST: CellDef[] = Object.values(CELL_TYPES);
 
 export interface RaceCell {
   index: number;
-  hole: WormholeKind | null;
-  /** Wormholes are single-use: the first player through burns it. */
-  used: boolean;
+  kind: CellKind | null;
+  /** Face down until somebody lands on it; then lit for everyone, forever. */
+  revealed: boolean;
 }
 
-/** Cells 0..distance. Zero is the start, the last one is the mega-boss and
- *  never carries a wormhole — the finale should be earned, not teleported to. */
+/** Cells 0..distance. Zero is the start, the last one is the mega-boss and is
+ *  never special — the finale should be earned, not teleported past. */
 export function makeBoard(distance: number, rng: Rng): RaceCell[] {
   const cells: RaceCell[] = [];
-  for (let i = 0; i <= distance; i++) cells.push({ index: i, hole: null, used: false });
+  for (let i = 0; i <= distance; i++) cells.push({ index: i, kind: null, revealed: false });
 
-  const kinds: WormholeKind[] = ['leap', 'leap', 'leap', 'pit', 'pit', 'pit', 'roulette', 'roulette', 'swap', 'spring'];
-  for (let at = 3 + rng.int(0, 2); at < distance; at += 3 + rng.int(0, 3)) {
-    cells[at].hole = rng.pick(kinds);
+  const pool: CellKind[] = [];
+  for (const def of CELL_LIST) for (let i = 0; i < def.weight; i++) pool.push(def.kind);
+
+  // Denser than a classic board: about one cell in three does something, so a
+  // roll is rarely just a step.
+  for (let at = 2 + rng.int(0, 2); at < distance; at += 2 + rng.int(0, 3)) {
+    cells[at].kind = rng.pick(pool);
   }
   return cells;
 }
 
 /** Which campaign level a cell plays. The track is stretched over the whole
- *  campaign, so a blitz race still ends at DOH. */
-export function levelForCell(cell: number, distance: number, total: number): number {
+ *  campaign, so a blitz race still ends at DOH.
+ *
+ *  The seed nudges every cell by up to two levels either way. Without it the
+ *  opening level was the same in every single race — and the whole track was,
+ *  too. The last cell is exempt: the finale is DOH and nothing else. */
+export function levelForCell(cell: number, distance: number, total: number, seed = 0): number {
   if (distance <= 0) return 0;
-  return Math.min(total - 1, Math.max(0, Math.round((cell / distance) * (total - 1))));
+  const base = Math.round((cell / distance) * (total - 1));
+  if (cell >= distance) return total - 1;
+  // A small deterministic hash: same seed and cell, same level, on every client.
+  let h = (seed ^ ((cell + 1) * 2654435761)) >>> 0;
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d) >>> 0;
+  // The opening cell draws from the eight hand-made openers rather than being
+  // nudged: level 1 was the same in every race, and it is the level everybody
+  // sees most often.
+  if (cell === 0) return h % 8;
+  const jitter = (h % 7) - 3;
+  return Math.min(total - 2, Math.max(0, base + jitter));
 }
 
 // ---------------------------------------------------------------- players ---
@@ -116,124 +277,247 @@ export interface RacePlayer {
   name: string;
   accent: string;
   cell: number;
-  influence: number;
-  /** Cards in hand; null means the slot is refilling. */
+  /** The three cards on this seat's keys; null while a slot is empty. */
   hand: (CardId | null)[];
-  /** Seconds left before an empty slot draws again. */
-  cool: number[];
-  /** Seat of the ally, or null. A pact is always mutual. */
-  pact: number | null;
-  /** Dice modifier waiting to be spent on this player's next roll. */
+  /** Everything else earned and not yet played. */
+  reserve: CardId[];
+  /** Seconds until each slot can fire again. Above zero, its key selects. */
+  cd: number[];
+  /** Lives carried from turn to turn. */
+  lives: number;
+  /** Turns to sit out, from the cell that skips you. */
+  skipTurns: number;
+  /** Next level opens with the super already charged. */
+  chargedSuper: boolean;
+  /** Union this player belongs to, or null for a lone racer. Two seats sharing
+   *  a team are allies; a team may hold three, which is what makes 3-on-3 over
+   *  the network a thing rather than two duels. */
+  team: number | null;
+  /** Waiting on this player's next roll. */
   diceMod: number;
+  /** Waiting on this player's next turn. */
+  bonusSeconds: number;
   /** Catapult debt: the next level opens with a debuff. */
   springDebt: boolean;
-  /** Turns played, for the closing table. */
   turns: number;
   cleared: number;
 }
 
-export function makePlayer(seat: number, name: string): RacePlayer {
-  return {
+export function makePlayer(seat: number, name: string, rng: Rng): RacePlayer {
+  const p: RacePlayer = {
     seat,
     name,
     accent: SEAT_COLORS[seat % SEAT_COLORS.length],
     cell: 0,
-    influence: 10,
     hand: new Array(HAND_SIZE).fill(null),
-    cool: new Array(HAND_SIZE).fill(0),
-    pact: null,
+    reserve: Array.from({ length: START_CARDS }, () => drawCard(rng)),
+    cd: new Array(HAND_SIZE).fill(0),
+    lives: RACE_START_LIVES,
+    skipTurns: 0,
+    chargedSuper: false,
+    team: null,
     diceMod: 0,
+    bonusSeconds: 0,
     springDebt: false,
     turns: 0,
     cleared: 0,
   };
+  // Deal the opening hand off the reserve, or every seat starts with three
+  // empty keys and cards it cannot reach.
+  fillHand(p);
+  return p;
+}
+
+/** Every card a seat owns: what is on the keys plus what waits behind. */
+export function cardCount(p: RacePlayer): number {
+  return p.hand.filter((c) => c !== null).length + p.reserve.length;
+}
+
+export function giveCards(p: RacePlayer, n: number, rng: Rng, players: RacePlayer[] = []): number {
+  let given = 0;
+  for (let i = 0; i < n && cardCount(p) < STOCK_MAX; i++) {
+    p.reserve.push(players.length ? drawCardFor(p, players, rng) : drawCard(rng));
+    given++;
+  }
+  fillHand(p);
+  return given;
+}
+
+/** Empty slots take the next card in reserve. A slot is filled the moment it
+ *  fires, so there is always a candidate to look at — and to change. */
+export function fillHand(p: RacePlayer): void {
+  for (let i = 0; i < HAND_SIZE; i++) {
+    if (p.hand[i] === null && p.reserve.length) p.hand[i] = p.reserve.shift()!;
+  }
+}
+
+/** Swaps the slot's card for the next one in reserve, sending the old one to
+ *  the back. The other two slots are left alone: only the key you pressed
+ *  changes. */
+export function cycleCard(p: RacePlayer, slot: number): CardId | null {
+  const current = p.hand[slot];
+  if (!p.reserve.length) return null;
+  p.hand[slot] = p.reserve.shift()!;
+  if (current) p.reserve.push(current);
+  return p.hand[slot];
+}
+
+/** Fires the slot: hands back the card, starts its cooldown and pulls the next
+ *  candidate in behind it. */
+export function playFromHand(p: RacePlayer, slot: number): CardId | null {
+  const id = p.hand[slot];
+  if (!id) return null;
+  p.hand[slot] = null;
+  p.cd[slot] = CARD_COOLDOWN;
+  fillHand(p);
+  return id;
+}
+
+/** Runs the slot clocks. */
+export function tickCards(p: RacePlayer, dt: number): void {
+  for (let i = 0; i < p.cd.length; i++) {
+    if (p.cd[i] > 0) p.cd[i] = Math.max(0, p.cd[i] - dt);
+  }
+}
+
+/** Everyone starts a turn armed: a cooldown left over from the previous turn
+ *  would be punishing for reasons nobody could see. */
+export function armCards(players: RacePlayer[]): void {
+  for (const p of players) {
+    p.cd.fill(0);
+    fillHand(p);
+  }
 }
 
 // ------------------------------------------------------------------ cards ---
 
 export type CardId =
+  | 'time10'
+  | 'time15'
   | 'multiball'
-  | 'expand'
-  | 'laser'
   | 'life'
-  | 'slow'
-  | 'energy'
   | 'lavaball'
+  | 'anchor'
   | 'tailwind'
+  | 'burn10'
+  | 'burn15'
   | 'frost'
   | 'mirror'
-  | 'haste'
   | 'blind'
   | 'steel'
   | 'jam'
-  | 'quake'
-  | 'shrink'
   | 'weight'
-  | 'tax';
+  // Gifts: rare, strong, and impossible to use on yourself. A lone racer
+  // holding one is holding a paperweight.
+  | 'giftPlasma'
+  | 'giftLives'
+  | 'giftShield'
+  | 'giftTime'
+  | 'giftPierce'
+  | 'giftBreaker';
 
-/** What a card actually does. Kept as data so the scene owns every arena call
- *  and this module stays testable on its own. */
+/** What a card does. Data, so the scene owns every arena call and this module
+ *  stays a pure rulebook. */
 export type CardEffect =
   | { t: 'powerup'; id: PowerupId }
   | { t: 'debuff'; id: DebuffId }
   | { t: 'ball'; id: BallTypeId }
   | { t: 'dice'; delta: number }
-  | { t: 'tax'; amount: number };
+  | { t: 'clock'; delta: number }
+  /** Charges the super and fires it there and then — the timing is the gift. */
+  | { t: 'super' }
+  | { t: 'lives'; delta: number }
+  /** Blows the energy nodes holding the last boss's shield — on an ally's
+   *  field, and only there. */
+  | { t: 'breakShield' };
 
 export interface CardDef {
   id: CardId;
   name: string;
   icon: string;
   color: string;
-  /** Influence it costs to play. */
-  cost: number;
   kind: 'buff' | 'debuff';
+  /** Marks the strong ally-only cards. Every buff is ally-only now; this is
+   *  what tells them apart in the interface. */
+  gift?: boolean;
   desc: string;
+  /** Relative frequency in the deck. */
+  weight: number;
   effect: CardEffect;
 }
 
-/** Eighteen cards. Most reuse effects the game already has — the interesting
- *  ones are the last three, which hit the dice and the economy instead of the
- *  ball, and so only make sense on a board. */
+/** Fifteen cards, and the two that matter most are the clock: the turn is a
+ *  countdown, so seconds are the currency everything else is measured against.
+ *  An ally topping you up by 10 and 15 is worth more than any power-up. */
 export const CARDS: Record<CardId, CardDef> = {
-  multiball: { id: 'multiball', name: 'Мультимяч', icon: '⁘', color: '#ffd24d', cost: 7, kind: 'buff', desc: '+2 мяча — щедрее всего, когда мяч высоко', effect: { t: 'powerup', id: 'multiball' } },
-  expand: { id: 'expand', name: 'Расширение', icon: '⬌', color: '#4de2ff', cost: 4, kind: 'buff', desc: 'Ракетка шире', effect: { t: 'powerup', id: 'expand' } },
-  laser: { id: 'laser', name: 'Лазер', icon: '↑', color: '#ff7a3d', cost: 6, kind: 'buff', desc: 'Ракетка стреляет', effect: { t: 'powerup', id: 'laser' } },
-  life: { id: 'life', name: 'Жизнь', icon: '♥', color: '#ff5fa2', cost: 9, kind: 'buff', desc: '+1 жизнь на этот ход', effect: { t: 'powerup', id: 'life' } },
-  slow: { id: 'slow', name: 'Замедление', icon: '≈', color: '#7c6cff', cost: 5, kind: 'buff', desc: 'Мячи успокаиваются', effect: { t: 'powerup', id: 'slow' } },
-  energy: { id: 'energy', name: 'Энергия', icon: '⚡', color: '#b06bff', cost: 5, kind: 'buff', desc: '+35 к заряду супера', effect: { t: 'powerup', id: 'energy' } },
-  lavaball: { id: 'lavaball', name: 'Лава-болл', icon: '🔥', color: '#ff6a2b', cost: 8, kind: 'buff', desc: 'Мяч прошивает кирпичи', effect: { t: 'ball', id: 'lava' } },
-  tailwind: { id: 'tailwind', name: 'Попутный ветер', icon: '⇢', color: '#3ddc84', cost: 6, kind: 'buff', desc: '+1 к его броску кубика', effect: { t: 'dice', delta: 1 } },
+  time10: { id: 'time10', name: '+10 секунд', icon: '⏱', color: '#3ddc84', kind: 'buff', weight: 5, desc: 'Добавляет 10 секунд к таймеру хода', effect: { t: 'clock', delta: 10 } },
+  time15: { id: 'time15', name: '+15 секунд', icon: '⏱', color: '#3ddc84', kind: 'buff', weight: 3, desc: 'Добавляет 15 секунд к таймеру хода', effect: { t: 'clock', delta: 15 } },
+  multiball: { id: 'multiball', name: 'Мультимяч', icon: '⁘', color: '#ffd24d', kind: 'buff', weight: 4, desc: '+2 мяча — щедрее всего, когда мяч высоко', effect: { t: 'powerup', id: 'multiball' } },
+  life: { id: 'life', name: 'Жизнь', icon: '♥', color: '#ff5fa2', kind: 'buff', weight: 3, desc: '+1 жизнь прямо сейчас', effect: { t: 'powerup', id: 'life' } },
+  lavaball: { id: 'lavaball', name: 'Лава-болл', icon: '🔥', color: '#ff6a2b', kind: 'buff', weight: 3, desc: 'Мяч прошивает кирпичи', effect: { t: 'ball', id: 'lava' } },
+  anchor: { id: 'anchor', name: 'Опора', icon: '⬌', color: '#4de2ff', kind: 'buff', weight: 4, desc: 'Ракетка шире', effect: { t: 'powerup', id: 'expand' } },
+  tailwind: { id: 'tailwind', name: 'Попутный ветер', icon: '⇢', color: '#3ddc84', kind: 'buff', weight: 3, desc: '+1 к его броску кубика', effect: { t: 'dice', delta: 1 } },
 
-  frost: { id: 'frost', name: 'Мороз', icon: '❄', color: '#8ef0ff', cost: 6, kind: 'debuff', desc: 'Ракетка еле ползёт', effect: { t: 'debuff', id: 'frost' } },
-  mirror: { id: 'mirror', name: 'Зеркало', icon: '↔', color: '#ff5fa2', cost: 7, kind: 'debuff', desc: 'Управление наоборот', effect: { t: 'debuff', id: 'mirror' } },
-  haste: { id: 'haste', name: 'Разгон', icon: '≫', color: '#ff4d6d', cost: 6, kind: 'debuff', desc: 'Мяч срывается с цепи', effect: { t: 'debuff', id: 'haste' } },
-  blind: { id: 'blind', name: 'Помехи', icon: '▓', color: '#5a6472', cost: 7, kind: 'debuff', desc: 'Поле заливает рябью', effect: { t: 'debuff', id: 'blind' } },
-  steel: { id: 'steel', name: 'Стальной ряд', icon: '▦', color: '#9fb3c8', cost: 9, kind: 'debuff', desc: 'Сверху падает ряд стали', effect: { t: 'debuff', id: 'steel' } },
-  jam: { id: 'jam', name: 'Глушилка', icon: '⌁', color: '#ffd24d', cost: 7, kind: 'debuff', desc: 'Скиллы уходят на перезарядку', effect: { t: 'debuff', id: 'jam' } },
-  quake: { id: 'quake', name: 'Толчок', icon: '⇊', color: '#3ddc84', cost: 8, kind: 'debuff', desc: 'Поле оседает на ряд вниз', effect: { t: 'debuff', id: 'quake' } },
-  shrink: { id: 'shrink', name: 'Сжатие', icon: '⬍', color: '#ff4d6d', cost: 5, kind: 'debuff', desc: 'Ракетка уже', effect: { t: 'powerup', id: 'shrink' } },
-  weight: { id: 'weight', name: 'Гиря', icon: '⚓', color: '#9fb3c8', cost: 6, kind: 'debuff', desc: '−1 к его броску кубика', effect: { t: 'dice', delta: -1 } },
-  tax: { id: 'tax', name: 'Пошлина', icon: '◍', color: '#c46bff', cost: 5, kind: 'debuff', desc: 'Снимает 4 влияния в вашу пользу', effect: { t: 'tax', amount: 4 } },
+  burn10: { id: 'burn10', name: '−10 секунд', icon: '⌛', color: '#ff4d6d', kind: 'debuff', weight: 5, desc: 'Сжигает 10 секунд таймера', effect: { t: 'clock', delta: -10 } },
+  burn15: { id: 'burn15', name: '−15 секунд', icon: '⌛', color: '#ff4d6d', kind: 'debuff', weight: 3, desc: 'Сжигает 15 секунд таймера', effect: { t: 'clock', delta: -15 } },
+  frost: { id: 'frost', name: 'Мороз', icon: '❄', color: '#8ef0ff', kind: 'debuff', weight: 4, desc: 'Ракетка еле ползёт', effect: { t: 'debuff', id: 'frost' } },
+  mirror: { id: 'mirror', name: 'Зеркало', icon: '↔', color: '#ff5fa2', kind: 'debuff', weight: 4, desc: 'Управление наоборот', effect: { t: 'debuff', id: 'mirror' } },
+  blind: { id: 'blind', name: 'Помехи', icon: '▓', color: '#5a6472', kind: 'debuff', weight: 3, desc: 'Поле заливает рябью', effect: { t: 'debuff', id: 'blind' } },
+  steel: { id: 'steel', name: 'Стальной ряд', icon: '▦', color: '#9fb3c8', kind: 'debuff', weight: 3, desc: 'Сверху падает ряд стали', effect: { t: 'debuff', id: 'steel' } },
+  jam: { id: 'jam', name: 'Глушилка', icon: '⌁', color: '#ffd24d', kind: 'debuff', weight: 3, desc: 'Скиллы уходят на перезарядку', effect: { t: 'debuff', id: 'jam' } },
+  weight: { id: 'weight', name: 'Гиря', icon: '⚓', color: '#9fb3c8', kind: 'debuff', weight: 3, desc: '−1 к его броску кубика', effect: { t: 'dice', delta: -1 } },
+
+  // Gifts. Rare, and they only ever leave your hand towards an ally, which is
+  // the whole point: a union gets a toolkit, not just a non-aggression pact.
+  giftPlasma: { id: 'giftPlasma', name: 'Залп в подарок', icon: '⁂', color: '#ff7a3d', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: супер заряжается и бьёт немедленно', effect: { t: 'super' } },
+  giftLives: { id: 'giftLives', name: 'Второе дыхание', icon: '✚', color: '#ff8fc4', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: +2 жизни', effect: { t: 'lives', delta: 2 } },
+  giftShield: { id: 'giftShield', name: 'Ангел-хранитель', icon: '▭', color: '#4de2ff', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: барьер внизу поймает мяч', effect: { t: 'powerup', id: 'shield' } },
+  giftTime: { id: 'giftTime', name: 'Перекур', icon: '⏳', color: '#3ddc84', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: +25 секунд', effect: { t: 'clock', delta: 25 } },
+  giftPierce: { id: 'giftPierce', name: 'Пробой', icon: '✹', color: '#ffd24d', kind: 'buff', gift: true, weight: 3, desc: 'Союзнику: мяч прошивает кирпичи', effect: { t: 'powerup', id: 'pierce' } },
+  giftBreaker: { id: 'giftBreaker', name: 'Сброс щита', icon: '⊘', color: '#ff2d55', kind: 'buff', gift: true, weight: 2, desc: 'Союзнику: сносит энергоузлы мега-босса — и, возможно, отдаёт ему победу', effect: { t: 'breakShield' } },
 };
 
 export const CARD_LIST: CardDef[] = Object.values(CARDS);
 
+const CARD_POOL: CardId[] = CARD_LIST.flatMap((def) => Array.from({ length: def.weight }, () => def.id));
+
 export function drawCard(rng: Rng): CardId {
-  return rng.pick(CARD_LIST).id;
+  return rng.pick(CARD_POOL);
 }
 
-/** Half price for helping an ally — the only mechanical teeth a pact has, and
- *  enough to make one worth offering. */
-export function cardCost(def: CardDef, from: RacePlayer, to: RacePlayer): number {
-  const allied = from.pact === to.seat;
-  return allied && def.kind === 'buff' ? Math.ceil(def.cost / 2) : def.cost;
+/** A draw for a particular player. Sixty per cent of the deck helps somebody,
+ *  and a lone racer has nobody to help — so their draws lean towards what they
+ *  can actually throw. One retry, not a filter: a union may still be formed,
+ *  and gifts should keep turning up as the reason to form one. */
+export function drawCardFor(p: RacePlayer, players: RacePlayer[], rng: Rng): CardId {
+  const id = drawCard(rng);
+  if (teammates(players, p).length) return id;
+  return CARDS[id].kind === 'buff' ? drawCard(rng) : id;
 }
 
-/** A pact bans hitting your ally outright: buffs only, or the pact means
- *  nothing. */
+/** Teammates cannot hit each other: buffs only, or a union means nothing. There
+ *  is no price on a card beyond having earned it. */
+export function allied(a: RacePlayer, b: RacePlayer): boolean {
+  return a !== b && a.team !== null && a.team === b.team;
+}
+
+export function teammates(players: RacePlayer[], p: RacePlayer): RacePlayer[] {
+  return players.filter((q) => allied(p, q));
+}
+
+/** One rule, both ways round: you help your union and you hurt everybody else.
+ *  Handing a rival a multiball was never anything but a mistake, so a buff now
+ *  only ever travels to an ally — which is what makes a union worth having. */
 export function cardAllowed(def: CardDef, from: RacePlayer, to: RacePlayer): boolean {
-  return !(from.pact === to.seat && def.kind === 'debuff');
+  return allied(from, to) ? def.kind === 'buff' : def.kind === 'debuff';
+}
+
+/** The smallest free team number, or null when all three are taken. */
+export function freeTeam(players: RacePlayer[]): number | null {
+  for (let i = 0; i < TEAM_LABELS.length; i++) {
+    if (!players.some((p) => p.team === i)) return i;
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------- dice ---
@@ -247,6 +531,7 @@ export interface TurnResult {
   livesLost: number;
   bestCombo: number;
   bricks: number;
+  boss: boolean;
 }
 
 export interface RollBonus {
@@ -274,86 +559,350 @@ export interface Roll {
   die: number;
   bonuses: RollBonus[];
   total: number;
+  line: string;
+}
+
+/** Four readings per face, drawn at random. The die is the loudest moment of
+ *  the turn and it deserves a voice. */
+export const DIE_LINES: string[][] = [
+  ['Единица. Трасса смеётся.', 'Один шаг. Символический.', 'Кубик показал минимум и не извинился.', 'Единица — это тоже движение. Формально.'],
+  ['Двойка. Скромно, но честно.', 'Два шага, полёта нет.', 'Двойка: ни туда ни сюда.', 'Кубик выдал двойку и отвернулся.'],
+  ['Тройка. Рабочий ход.', 'Три — без подвига, но и без позора.', 'Тройка. Идём дальше.', 'Кубик отмерил три и успокоился.'],
+  ['Четвёрка. Уже разговор.', 'Четыре шага вперёд.', 'Четвёрка — крепкий бросок.', 'Кубик расщедрился на четыре.'],
+  ['Пятёрка! Почти праздник.', 'Пять шагов — соперники напряглись.', 'Пятёрка. Хороший день.', 'Кубик лёг пятёркой вверх.'],
+  ['ШЕСТЬ! Кубик на вашей стороне.', 'Шестёрка — максимум, и он ваш.', 'Шесть. Вот это ход.', 'Кубик выложился полностью: шесть.'],
+];
+
+export function dieLine(rng: Rng, die: number): string {
+  return rng.pick(DIE_LINES[Math.min(5, Math.max(0, die - 1))]);
+}
+
+/** Scores a die that has already been thrown. Over the network the die comes
+ *  from the server, and every client has to arrive at the same total — so the
+ *  scoring lives here, apart from the throwing. */
+export function makeRoll(die: number, rng: Rng, r: TurnResult, diceMod: number): Roll {
+  const bonuses = playBonuses(r, diceMod);
+  const sum = bonuses.reduce((a, b) => a + b.value, 0);
+  return { die, bonuses, total: Math.max(1, die + sum), line: dieLine(rng, die) };
 }
 
 /** Death costs the whole move. Anything else advances at least one cell, so a
  *  bad level never freezes you in place. */
 export function rollDice(rng: Rng, r: TurnResult, diceMod: number): Roll {
-  const die = rng.int(1, 7);
-  const bonuses = playBonuses(r, diceMod);
-  const sum = bonuses.reduce((a, b) => a + b.value, 0);
-  return { die, bonuses, total: r.died ? 0 : Math.max(1, die + sum) };
+  return makeRoll(rng.int(1, 7), rng, r, diceMod);
 }
 
-/** Influence earned by the turn. The player at the table earns from the bricks
- *  they break; everyone waiting earns a flat wage, or they would be spectators
- *  with empty pockets. */
-export function influenceForTurn(r: TurnResult): number {
-  return 2 + Math.floor(r.bricks / 8) + (r.cleared ? 4 : 0);
+/** Cards handed out by a turn, per seat. Over the network these are drawn by
+ *  the client that played the turn and travel as plain ids: card draws must not
+ *  come off the shared random stream, or a capsule caught on one screen would
+ *  desync every other one. */
+export interface TurnAward {
+  seat: number;
+  cards: CardId[];
 }
 
-export const IDLE_INFLUENCE = 5;
+/** The turn result as it goes over the wire: what the level did, plus the cards
+ *  it paid out. */
+export interface TurnReport extends TurnResult {
+  awards: TurnAward[];
+}
 
-// -------------------------------------------------------------- wormholes ---
+/** Cards the turn itself paid out, on top of the ones caught at the paddle. */
+export function cardsForTurn(r: TurnResult): number {
+  if (!r.cleared) return 0;
+  return r.boss ? BOSS_CLEAR_CARDS : CLEAR_CARDS;
+}
 
-export interface WormholeOutcome {
-  kind: WormholeKind;
+// ------------------------------------------------------------- commentary ---
+
+/** Positions before the move, seat -> cell. */
+export type Standings = Map<number, number>;
+
+export function snapshot(players: RacePlayer[]): Standings {
+  return new Map(players.map((p) => [p.seat, p.cell]));
+}
+
+// Player names are free text, so no line may bend one into another case or
+// assume a gender: every template keeps the name in the nominative and builds
+// the sentence around it. "Обходит Машу" would need declension we cannot do.
+// Numbers do have to agree, though, hence the two forms of "клетка".
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(n) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+/** "на 1 клетку", "на 2 клетки", "на 5 клеток" */
+const cellsAcc = (n: number): string => `${n} ${plural(n, 'клетку', 'клетки', 'клеток')}`;
+/** "осталась 1 клетка", "осталось 5 клеток" */
+const cellsNom = (n: number): string => `${n} ${plural(n, 'клетка', 'клетки', 'клеток')}`;
+
+const LEAD_TAKEN = [
+  (x: string, y: string) => `${x} выходит вперёд, ${y} — на вторую строчку`,
+  (x: string, y: string) => `Лидер сменился: впереди ${x}, следом ${y}`,
+  (x: string, y: string) => `Первая строчка — ${x}. ${y} уступает`,
+  (x: string) => `${x} возглавляет гонку`,
+];
+
+const LEAD_KEPT = [
+  (x: string, n: number) => `${x} отрывается на ${cellsAcc(n)}`,
+  (x: string, n: number) => `Отрыв растёт — ${x} впереди на ${cellsAcc(n)}`,
+  (x: string, n: number) => `${x} идёт первым: преимущество в ${cellsAcc(n)}`,
+];
+
+const OVERTAKE = [
+  (x: string, y: string) => `${x} обгоняет — ${y} остаётся позади`,
+  (x: string, y: string) => `Позиции поменялись: ${x} выше, ${y} ниже`,
+  (x: string, y: string) => `${x} проходит вперёд, ${y} пропускает`,
+];
+
+const TO_LAST = [
+  (x: string) => `${x} теперь замыкает гонку`,
+  (x: string) => `${x} становится самым последним`,
+  (x: string) => `Последняя строчка — ${x}`,
+];
+
+const OFF_LAST = [
+  (x: string) => `${x} выбирается с последнего места`,
+  (x: string) => `${x} больше не замыкает таблицу`,
+];
+
+const BEHIND = [
+  (x: string, y: string, n: number) => `${x} позади на ${cellsAcc(n)}, впереди ${y}`,
+  (x: string, y: string, n: number) => `Отставание в ${cellsAcc(n)}: лидер ${y}, следом ${x}`,
+];
+
+const LEAD_THIN = [
+  (x: string, n: number) => `${x} первый, но отрыв всего ${cellsNom(n)}`,
+  (x: string, n: number) => `${x} впереди — преимущество пока ${cellsNom(n)}`,
+];
+
+const TIED = [
+  (x: string, y: string) => `${x} и ${y} на одной клетке — ноздря в ноздрю`,
+  (x: string, y: string) => `Одна клетка на двоих: ${x} и ${y}`,
+];
+
+const SETBACK = [
+  (x: string, n: number) => `${x} — назад на ${cellsAcc(n)}`,
+  (x: string, n: number) => `Откат: ${x} теряет ${cellsAcc(n)}`,
+  (x: string, n: number) => `Трасса наказывает: ${x} минус ${cellsAcc(n)}`,
+];
+
+const SURGE = [
+  (x: string, n: number) => `${x} прыгает вперёд сразу на ${cellsAcc(n)}`,
+  (x: string, n: number) => `Сразу на ${cellsAcc(n)} — это ${x}`,
+];
+
+const HALFWAY = [
+  (x: string) => `${x}: половина трассы позади`,
+  (x: string) => `Половина трассы пройдена: ${x}`,
+];
+
+const NEAR_END = [
+  (x: string, n: number) => `${x} — до мега-босса ${cellsNom(n)}`,
+  (x: string, n: number) => `${x} уже видит DOH: осталось ${cellsNom(n)}`,
+];
+
+const AT_END = [
+  (x: string) => `${x} на последней клетке — следующий ход за мега-босса`,
+  (x: string) => `${x} у самого DOH. Дальше только он`,
+];
+
+/** What the table looks like after a move, said out loud. Positions are
+ *  compared with the snapshot taken before the turn, so a swap or a pit shows
+ *  up here as readily as a good roll.
+ *
+ *  Only a couple of lines come back: a commentator who says everything says
+ *  nothing. */
+export function raceComments(
+  before: Standings,
+  players: RacePlayer[],
+  mover: RacePlayer,
+  distance: number,
+  rng: Rng,
+): string[] {
+  const out: string[] = [];
+  const name = (p: RacePlayer): string => p.name;
+  const rank = (cells: Standings): RacePlayer[] =>
+    [...players].sort((a, b) => (cells.get(b.seat) ?? 0) - (cells.get(a.seat) ?? 0));
+
+  const now = snapshot(players);
+  const wasOrder = rank(before);
+  const nowOrder = rank(now);
+  const delta = (now.get(mover.seat) ?? 0) - (before.get(mover.seat) ?? 0);
+
+  // A change at the top always leads.
+  if (nowOrder[0] === mover && wasOrder[0] !== mover) {
+    out.push(rng.pick(LEAD_TAKEN)(name(mover), name(wasOrder[0])));
+  } else if (nowOrder[0] === mover && nowOrder.length > 1) {
+    const gap = mover.cell - nowOrder[1].cell;
+    if (gap >= 3) out.push(rng.pick(LEAD_KEPT)(name(mover), gap));
+  } else {
+    // Whoever the mover physically passed this turn.
+    const passed = players.filter(
+      (p) =>
+        p !== mover &&
+        (before.get(mover.seat) ?? 0) <= (before.get(p.seat) ?? 0) &&
+        mover.cell > p.cell,
+    );
+    if (passed.length) out.push(rng.pick(OVERTAKE)(name(mover), name(rng.pick(passed))));
+  }
+
+  // Movement worth remarking on by itself.
+  if (delta <= -4) out.push(rng.pick(SETBACK)(name(mover), -delta));
+  else if (delta >= 7) out.push(rng.pick(SURGE)(name(mover), delta));
+
+  // The bottom of the table.
+  const wasLast = wasOrder[wasOrder.length - 1];
+  const nowLast = nowOrder[nowOrder.length - 1];
+  if (nowLast !== wasLast) {
+    if (nowLast === mover) out.push(rng.pick(TO_LAST)(name(mover)));
+    else if (wasLast === mover) out.push(rng.pick(OFF_LAST)(name(mover)));
+    else out.push(rng.pick(TO_LAST)(name(nowLast)));
+  }
+
+  // Milestones, only the first time they are crossed.
+  const half = Math.floor(distance / 2);
+  if ((before.get(mover.seat) ?? 0) < half && mover.cell >= half && mover.cell < distance) {
+    out.push(rng.pick(HALFWAY)(name(mover)));
+  }
+  if (mover.cell >= distance) {
+    out.push(rng.pick(AT_END)(name(mover)));
+  } else if (distance - mover.cell <= 5 && distance - (before.get(mover.seat) ?? 0) > 5) {
+    out.push(rng.pick(NEAR_END)(name(mover), distance - mover.cell));
+  }
+
+  // Nothing dramatic? Then just place the mover in the field — a commentator
+  // who goes silent on the opening turn reads as broken.
+  if (!out.length) {
+    const leader = nowOrder[0];
+    const tiedWith = players.find((p) => p !== mover && p.cell === mover.cell);
+    if (tiedWith) out.push(rng.pick(TIED)(name(mover), name(tiedWith)));
+    else if (leader !== mover) out.push(rng.pick(BEHIND)(name(mover), name(leader), leader.cell - mover.cell));
+    else if (nowOrder.length > 1) out.push(rng.pick(LEAD_THIN)(name(mover), mover.cell - nowOrder[1].cell));
+  }
+
+  return out.slice(0, 3);
+}
+
+// ------------------------------------------------------------------ cells ---
+
+export interface CellOutcome {
+  kind: CellKind;
   /** Cells moved, signed. */
   delta: number;
-  /** Seat swapped with, for the 'swap' hole. */
   swappedWith: number | null;
+  /** True when the turn order flipped for good. */
+  reversed: boolean;
+  /** True when the turn goes back to whoever played before this one. */
+  rewind: boolean;
   text: string;
+  /** The station's own words about what just happened. */
+  line: string;
 }
 
-/** Resolves the hole the player just landed on, mutating positions. */
-export function resolveWormhole(
-  kind: WormholeKind,
+/** Resolves the cell the player just landed on, mutating positions and the
+ *  player's pending bonuses. Revealing is the caller's job. */
+export function resolveCell(
+  kind: CellKind,
   player: RacePlayer,
   players: RacePlayer[],
   distance: number,
   rng: Rng,
-): WormholeOutcome {
+): CellOutcome {
+  const def = CELL_TYPES[kind];
+  const base: CellOutcome = {
+    kind,
+    delta: 0,
+    swappedWith: null,
+    reversed: false,
+    rewind: false,
+    text: def.name,
+    line: cellLine(kind, rng),
+  };
   const clampCell = (c: number): number => Math.min(distance, Math.max(0, c));
 
-  if (kind === 'swap') {
-    let best: RacePlayer | null = null;
-    for (const p of players) {
-      if (p === player) continue;
-      if (!best || Math.abs(p.cell - player.cell) < Math.abs(best.cell - player.cell)) best = p;
+  switch (kind) {
+    case 'swap': {
+      let best: RacePlayer | null = null;
+      for (const p of players) {
+        if (p === player) continue;
+        if (!best || Math.abs(p.cell - player.cell) < Math.abs(best.cell - player.cell)) best = p;
+      }
+      if (!best) return { ...base, text: 'Обмен: меняться не с кем' };
+      const from = player.cell;
+      player.cell = best.cell;
+      best.cell = from;
+      return { ...base, delta: player.cell - from, swappedWith: best.seat, text: `Обмен местами с ${best.name}` };
     }
-    if (!best) return { kind, delta: 0, swappedWith: null, text: 'Меняться не с кем' };
-    const from = player.cell;
-    player.cell = best.cell;
-    best.cell = from;
-    return {
-      kind,
-      delta: player.cell - from,
-      swappedWith: best.seat,
-      text: `Обмен местами с ${best.name}`,
-    };
+    case 'medkit':
+      player.lives += 1;
+      return { ...base, text: `Аптечка: +1 жизнь (теперь ${player.lives})` };
+    case 'hospital':
+      player.lives += 3;
+      return { ...base, text: `Госпиталь: +3 жизни (теперь ${player.lives})` };
+    case 'skip':
+      player.skipTurns += 1;
+      return { ...base, text: 'Карантин: следующий ход пропускается' };
+    case 'rewind':
+      return { ...base, rewind: true, text: 'Откат смены: ходит снова предыдущий игрок' };
+    case 'charge':
+      player.chargedSuper = true;
+      return { ...base, text: 'Перегрузка: следующий уровень начнётся с полным супером' };
+    case 'steal': {
+      // From whoever has most to spare; ties go to the lowest seat so that every
+      // client picks the same victim.
+      let victim: RacePlayer | null = null;
+      for (const p of players) {
+        if (p === player || p.lives <= 1) continue;
+        if (!victim || p.lives > victim.lives) victim = p;
+      }
+      if (!victim) return { ...base, text: 'Изъятие: брать не у кого — все и так бедны' };
+      victim.lives -= 1;
+      player.lives += 1;
+      return { ...base, text: `Изъятие: жизнь снята с ${victim.name} (у вас ${player.lives})` };
+    }
+    case 'clock':
+      player.bonusSeconds += 30;
+      return { ...base, text: 'Хронометр: +30 секунд к следующему ходу' };
+    case 'toll':
+      player.bonusSeconds -= 20;
+      return { ...base, text: 'Мытарь: −20 секунд на следующем ходу' };
+    case 'stash':
+      giveCards(player, 2, rng, players);
+      return { ...base, text: 'Тайник: две карты в запас' };
+    case 'reverse':
+      return { ...base, reversed: true, text: 'Реверс: порядок ходов перевёрнут' };
+    case 'start': {
+      const before = player.cell;
+      player.cell = 0;
+      return { ...base, delta: -before, text: 'Обрыв: обратно на старт' };
+    }
+    default: {
+      let delta: number;
+      if (kind === 'leap') delta = rng.int(3, 9);
+      else if (kind === 'pit') delta = -rng.int(2, 6);
+      else if (kind === 'spring') delta = rng.int(6, 13);
+      else delta = rng.chance(0.5) ? rng.int(4, 11) : -rng.int(4, 11);
+
+      const before = player.cell;
+      player.cell = clampCell(player.cell + delta);
+      const moved = player.cell - before;
+      if (kind === 'spring') player.springDebt = true;
+
+      return {
+        ...base,
+        delta: moved,
+        text:
+          moved === 0
+            ? `${def.name}: дальше некуда`
+            : moved > 0
+              ? `${def.name}: вперёд на ${moved}`
+              : `${def.name}: назад на ${-moved}`,
+      };
+    }
   }
-
-  let delta: number;
-  if (kind === 'leap') delta = rng.int(3, 9);
-  else if (kind === 'pit') delta = -rng.int(2, 6);
-  else if (kind === 'spring') delta = rng.int(6, 13);
-  else delta = rng.chance(0.5) ? rng.int(4, 11) : -rng.int(4, 11);
-
-  const before = player.cell;
-  player.cell = clampCell(player.cell + delta);
-  const moved = player.cell - before;
-  if (kind === 'spring') player.springDebt = true;
-
-  const w = WORMHOLES[kind];
-  return {
-    kind,
-    delta: moved,
-    swappedWith: null,
-    text:
-      moved === 0
-        ? `${w.name}: дальше некуда`
-        : moved > 0
-          ? `${w.name}: вперёд на ${moved}`
-          : `${w.name}: назад на ${-moved}`,
-  };
 }

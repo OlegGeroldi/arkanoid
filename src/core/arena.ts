@@ -32,20 +32,22 @@ import {
   START_LIVES,
   WALL,
 } from './constants';
+import { Basement } from './basement';
 import { avoidShallow, clamp, setSpeed } from './math';
 import { Rng } from './rng';
 import { BRICK_KINDS, type Brick, type BrickCode } from './bricks';
 import { BALL_TYPES, type BallTypeId } from './balls';
 import { DEBUFFS, type DebuffId } from './debuffs';
 import { BOSSES, type BossDef, type BossId } from './bosses';
+import { LOCKS_FOR_MULTIBALL, LOCK_HOLD, makeProp, type Prop } from './props';
 import { SPEC_LEVEL, SPEC_LIST, SPECS, type SpecId } from './specialisation';
 import { MAX_RANK, SKILLS, SKILL_SLOTS, skillCooldown, skillDuration, type SkillId } from './skills';
-import { buildBricks, breakableCount, type LevelData } from './level';
+import { buildBricks, widenProps, breakableCount, type LevelData } from './level';
 import { POWERUP_LIST, POWERUPS, type FallingPowerup, type PowerupId } from './powerups';
 import { SUPERS, type SuperId } from './supers';
 import { baseStats, rollPerks, xpForLevel, XP_RATE, type Perk, type RunStats } from './progression';
 
-export type ArenaMode = 'solo' | 'versus';
+export type ArenaMode = 'solo' | 'versus' | 'race';
 
 export type ArenaState = 'serve' | 'play' | 'levelup' | 'spec' | 'cleared' | 'dead';
 
@@ -68,6 +70,8 @@ export interface Ball {
   debuffT: number;
   /** Bricks broken since the last charge was fired at the opponent. */
   debuffCharge: number;
+  /** Held by the boss: physics are suspended and it rides the boss's body. */
+  captured: boolean;
   trail: { x: number; y: number }[];
 }
 
@@ -75,6 +79,9 @@ export interface Laser {
   x: number;
   y: number;
   vy: number;
+  /** Fired by the plasma barrage rather than by the laser pickup: it punches
+   *  through indestructible bricks instead of dying on them. */
+  plasma?: boolean;
 }
 
 export type ArenaEvent =
@@ -91,6 +98,12 @@ export type ArenaEvent =
   | { t: 'skill'; id: SkillId; rank: number }
   | { t: 'bossHit'; x: number; y: number; color: string }
   | { t: 'bossPhase'; phase: 1 | 2 | 3 }
+  | { t: 'bossGrab'; taken: boolean; x: number; y: number }
+  | { t: 'prop'; kind: Prop['kind']; x: number; y: number; score: number }
+  | { t: 'targetsDown'; x: number; y: number }
+  | { t: 'multiball'; x: number; y: number }
+  | { t: 'cellarPot'; x: number; y: number; amount: number; won: boolean; double?: boolean }
+  | { t: 'slot'; kind: 'chips' | 'life' | 'pot' | 'super' | 'capsule' | 'bust'; x: number; y: number }
   | { t: 'bossShotHit'; x: number; y: number }
   | { t: 'bossDead'; id: BossId }
   | { t: 'attack'; power: number }
@@ -127,6 +140,9 @@ export const noInput = (): ArenaInput => ({
 
 export interface ArenaOptions {
   level: LevelData;
+  /** Opens the pinball floor under the arena: a ball past the paddle drops in
+   *  there instead of being lost, and can be flipped back up. */
+  basement?: boolean;
   seed?: number;
   superId?: SuperId;
   mode?: ArenaMode;
@@ -197,6 +213,9 @@ export interface BossState {
   pushTimer: number;
   hitFlash: number;
   dead: boolean;
+  /** Seconds left of the ball grab, and whether it has been spent. */
+  grabT: number;
+  grabUsed: boolean;
 }
 
 export interface BossShot {
@@ -204,6 +223,28 @@ export interface BossShot {
   y: number;
   vy: number;
 }
+
+/** Damage an explosive brick does to a boss it goes off against. Comparable to
+ *  a super hit, so clearing a boss's shield with explosives is a real tactic. */
+const EXPLOSION_BOSS_DAMAGE = 3;
+
+/** The last boss grabs a ball when its health drops to this share, and holds it
+ *  for this long. Once per fight. */
+const BOSS_GRAB_AT = 0.2;
+const BOSS_GRAB_SECONDS = 5;
+
+/** How fast magnetism swings a falling ball's heading towards the paddle, in
+ *  radians a second. Expressed as a turn rather than a shove because a shove
+ *  scaled with nothing: it kept accelerating sideways until the ball was
+ *  travelling almost flat, and a flat ball is a stuck ball. A third of a second
+ *  of this is a noticeable bend; a whole fall is about thirty degrees. */
+const MAGNET_TURN = 0.55;
+
+/** A boss can only be hurt by a blast this often. One charge going off is a
+ *  real hit; a chain reaction of nine is still one hit. Without this, the last
+ *  boss melts the instant its shield drops, and its own dropped walls — which
+ *  are deliberately full of charges — do the melting. */
+const BOSS_BLAST_COOLDOWN = 0.25;
 
 const zeroTimers = (): Timers => ({
   expand: 0,
@@ -315,6 +356,13 @@ export class Arena {
   brittleWear = 0;
   boss: BossState | null = null;
   bossShots: BossShot[] = [];
+  /** The pinball attic: bumpers and friends living in the upper rows. */
+  props: Prop[] = [];
+  /** Balls swallowed by locks. Two of them and the next one comes back with
+   *  company — the oldest promise in pinball. */
+  locked = 0;
+  /** Seconds until the boss can be hurt by an explosion again. */
+  private blastCd = 0;
   /** Admin cheat: losing the ball costs nothing and it is served straight back. */
   god = false;
   shake = 0;
@@ -326,9 +374,13 @@ export class Arena {
   levelTime = 0;
   bricksBroken = 0;
 
+  /** The pinball floor below, when the run was started with one. */
+  readonly basement: Basement<Ball> | null;
+
   constructor(opts: ArenaOptions) {
     this.mode = opts.mode ?? 'solo';
     this.width = opts.width ?? ARENA_W;
+    this.basement = opts.basement ? new Basement<Ball>(this.width, () => this.rng.next()) : null;
     this.cols = Math.round((this.width / ARENA_W) * COLS);
     this.brickW = brickWidthFor(this.width, this.cols);
     this.paddleX = this.width / 2;
@@ -355,12 +407,15 @@ export class Arena {
     this.boss = level.boss ? this.spawnBoss(BOSSES[level.boss]) : null;
     this.bossShots = [];
     this.bricks = buildBricks(level, this.cols, this.brickW);
+    this.props = widenProps(level.props, this.cols).map((p) => makeProp(p, this.brickW));
+    this.locked = 0;
     this.grid = new Array(this.cols * ROWS).fill(null);
     for (const b of this.bricks) this.grid[b.row * this.cols + b.col] = b;
     this.remaining = breakableCount(level, this.cols);
     this.powerups = [];
     this.lasers = [];
     this.balls = [];
+    this.basement?.reset();
     this.timers = zeroTimers();
     this.active = null;
     this.state = 'serve';
@@ -380,6 +435,8 @@ export class Arena {
       maxHp: def.hp,
       phase: 1,
       fireTimer: 2,
+      grabT: 0,
+      grabUsed: false,
       pushTimer: 6,
       hitFlash: 0,
       dead: false,
@@ -391,7 +448,17 @@ export class Arena {
    *  would restore the shield and the fight could never end. */
   get bossShielded(): boolean {
     if (!this.boss || !this.boss.def.shielded) return false;
-    return this.bricks.some((b) => b.alive && b.kind.hp > 0 && b.kind.code !== 'b');
+    // A node shield hangs on a handful of marked cells, not on the whole field:
+    // you hunt five bricks rather than clear a hundred, and the rows the boss
+    // keeps dropping are cover for them rather than a wall you must mop up.
+    if (this.boss.def.nodeShield) {
+      return this.bricks.some((b) => b.alive && b.kind.code === 'k');
+    }
+    // Only the level's own bricks are a shield. Anything pushed in later — the
+    // boss's own mixed wall, an opponent's steel row, a race card — must not
+    // re-arm it: a boss that pushes every seven seconds would otherwise make
+    // itself permanently invulnerable and the level unfinishable.
+    return this.bricks.some((b) => b.alive && b.kind.hp > 0 && !b.pushed);
   }
 
   private updateBoss(dt: number): void {
@@ -399,6 +466,7 @@ export class Arena {
     if (!boss || boss.dead) return;
 
     boss.hitFlash = Math.max(0, boss.hitFlash - dt * 3);
+    if (this.blastCd > 0) this.blastCd -= dt;
     const half = boss.def.w / 2;
     boss.x += boss.vx * dt;
     if (boss.x < WALL + half) {
@@ -420,7 +488,7 @@ export class Arena {
       if (phase === 3) boss.vx = boss.vx > 0 ? boss.def.speed * 1.5 : -boss.def.speed * 1.5;
     }
 
-    if (boss.phase >= 2) {
+    if (boss.phase >= 2 && boss.grabT <= 0) {
       boss.fireTimer -= dt;
       if (boss.fireTimer <= 0) {
         boss.fireTimer = boss.def.fireRate * (boss.phase === 3 ? 0.6 : 1);
@@ -442,8 +510,183 @@ export class Arena {
       }
     }
 
+    this.updateBossGrab(dt, ratio);
     this.updateBossShots(dt);
     this.collideBossWithBalls();
+  }
+
+  /** The last boss's one trick: at a fifth of its health it reaches out, takes
+   *  a ball and holds it for five seconds. Once per fight, and while it holds
+   *  on it stops shooting — it has its hands full, and the player needs to be
+   *  able to read what is happening rather than just lose. */
+  private updateBossGrab(dt: number, ratio: number): void {
+    const boss = this.boss;
+    if (!boss || !boss.def.grabsBall) return;
+
+    if (boss.grabT > 0) {
+      boss.grabT -= dt;
+      const held = this.balls.find((b) => b.captured);
+      if (held) {
+        held.x = boss.x;
+        held.y = boss.y + boss.def.h / 2;
+        if (boss.grabT <= 0) {
+          // Spat back out, straight down and fast: the ball comes back as a
+          // problem, not as a gift.
+          held.captured = false;
+          held.vx = this.rng.range(-0.35, 0.35);
+          held.vy = 1;
+          setSpeed(held, held.baseSpeed * 1.35);
+          avoidShallow(held);
+          this.events.push({ t: 'bossGrab', taken: false, x: held.x, y: held.y });
+        }
+      } else {
+        boss.grabT = 0;
+      }
+      return;
+    }
+
+    if (boss.grabUsed || ratio > BOSS_GRAB_AT) return;
+    // Take the ball closest to the boss that is actually in play.
+    let target: Ball | null = null;
+    for (const b of this.balls) {
+      if (b.held !== null || b.captured) continue;
+      if (!target || Math.hypot(b.x - boss.x, b.y - boss.y) < Math.hypot(target.x - boss.x, target.y - boss.y)) {
+        target = b;
+      }
+    }
+    if (!target) return;
+    boss.grabUsed = true;
+    boss.grabT = BOSS_GRAB_SECONDS;
+    target.captured = true;
+    target.vx = 0;
+    target.vy = 0;
+    this.shake = 1;
+    this.flash = 0.6;
+    this.events.push({ t: 'bossGrab', taken: true, x: target.x, y: target.y });
+  }
+
+  /** The attic. Everything here happens to a ball that is already in flight:
+   *  props never move and never fall, they only change where the ball goes and
+   *  what it pays on the way. */
+  private updateProps(dt: number): void {
+    for (const p of this.props) {
+      if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 3);
+      if (p.spinRate > 0) {
+        p.spin += p.spinRate * dt;
+        p.spinRate = Math.max(0, p.spinRate - dt * 6);
+      }
+      if (p.holdT > 0) {
+        p.holdT -= dt;
+        if (p.holdT <= 0) this.releaseLock(p);
+      }
+    }
+
+    for (const ball of this.balls) {
+      if (ball.held !== null || ball.captured) continue;
+      for (const p of this.props) {
+        if (p.down || p.holdT > 0) continue;
+        const dx = ball.x - p.x;
+        const dy = ball.y - p.y;
+        const reach = p.def.radius + ball.r;
+        if (dx * dx + dy * dy > reach * reach) continue;
+        this.hitProp(p, ball, dx, dy);
+      }
+    }
+  }
+
+  private hitProp(p: Prop, ball: Ball, dx: number, dy: number): void {
+    p.flash = 1;
+    const combo = 1 + Math.min(this.combo, COMBO_MAX) * 0.1;
+    const score = Math.round(p.def.score * combo);
+    this.score += score;
+    this.gainEnergy(ENERGY_PER_DAMAGE * this.stats.energyMul);
+    this.events.push({ t: 'prop', kind: p.kind, x: p.x, y: p.y, score });
+
+    const dist = Math.hypot(dx, dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    switch (p.kind) {
+      case 'bumper': {
+        // Straight back out along the normal, faster than it came in. Capped,
+        // or a cluster of bumpers would launch the ball past playable speed.
+        ball.vx = nx;
+        ball.vy = ny;
+        setSpeed(ball, Math.min(ball.baseSpeed * 1.35, BALL_SPEED_MAX));
+        avoidShallow(ball);
+        ball.x = p.x + nx * (p.def.radius + ball.r + 1);
+        ball.y = p.y + ny * (p.def.radius + ball.r + 1);
+        this.shake = Math.min(1, this.shake + 0.18);
+        break;
+      }
+      case 'sling': {
+        // Sideways, away from the field's centre: a sling should throw the ball
+        // back into play rather than straight down.
+        const outward = p.x < this.width / 2 ? 1 : -1;
+        ball.vx = outward * 0.85 + nx * 0.4;
+        ball.vy = ny >= 0 ? 0.5 : -0.5;
+        setSpeed(ball, Math.min(ball.baseSpeed * 1.2, BALL_SPEED_MAX));
+        avoidShallow(ball);
+        ball.x = p.x + ball.vx * (p.def.radius + ball.r + 1);
+        ball.y = p.y + ball.vy * (p.def.radius + ball.r + 1);
+        break;
+      }
+      case 'spinner':
+        // Passes straight through: the pay is for the crossing, not a bounce.
+        p.spinRate = 14;
+        break;
+      case 'target':
+        p.down = true;
+        if (this.props.every((q) => q.kind !== 'target' || q.down)) {
+          // A full set is worth going out of your way for.
+          this.events.push({ t: 'targetsDown', x: p.x, y: p.y });
+          this.dropReward(p.x, p.y);
+        }
+        break;
+      case 'lock':
+        // Swallowed. It comes back on its own, and the second one buys company.
+        ball.captured = true;
+        ball.vx = 0;
+        ball.vy = 0;
+        ball.x = p.x;
+        ball.y = p.y;
+        p.holdT = LOCK_HOLD;
+        this.locked++;
+        break;
+    }
+  }
+
+  /** Spits a locked ball back into play, with company once enough have been
+   *  swallowed. */
+  private releaseLock(p: Prop): void {
+    const ball = this.balls.find((b) => b.captured && Math.abs(b.x - p.x) < 2 && Math.abs(b.y - p.y) < 2);
+    if (!ball) return;
+    ball.captured = false;
+    ball.vx = this.rng.range(-0.6, 0.6);
+    ball.vy = 1;
+    setSpeed(ball, ball.baseSpeed);
+    avoidShallow(ball);
+    if (this.locked >= LOCKS_FOR_MULTIBALL) {
+      this.locked = 0;
+      this.addBall();
+      this.addBall();
+      this.flash = 0.6;
+    }
+  }
+
+  /** What a full set of drop targets pays: a capsule, dropped where the last
+   *  one fell. */
+  private dropReward(x: number, y: number): void {
+    const pool = POWERUP_LIST.filter((d) => !d.bad && !d.pvpOnly && !d.raceOnly);
+    const def = this.rng.pick(pool);
+    this.powerups.push({
+      id: def.id,
+      def,
+      x: x - POWERUP_W / 2,
+      y,
+      vy: POWERUP_FALL,
+      spin: this.rng.range(0, 6.28),
+    });
   }
 
   private updateBossShots(dt: number): void {
@@ -473,7 +716,10 @@ export class Arena {
     const half = boss.def.w / 2;
 
     for (const ball of this.balls) {
-      if (ball.held !== null) continue;
+      // A captured ball rides inside the boss's body. Without this it would
+      // register a collision every single frame and chew the boss to death in
+      // a quarter of a second — the grab would be a gift, not a threat.
+      if (ball.held !== null || ball.captured) continue;
       if (ball.x < boss.x - half - ball.r || ball.x > boss.x + half + ball.r) continue;
       if (ball.y + ball.r < boss.y || ball.y - ball.r > boss.y + boss.def.h) continue;
 
@@ -505,7 +751,7 @@ export class Arena {
 
     boss.hp -= amount;
     boss.hitFlash = 1;
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * 2 * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_DAMAGE * 2 * this.stats.energyMul);
     this.addXp(12 * amount);
     this.score += Math.round(10 * amount);
     this.events.push({ t: 'bossHit', x, y, color: boss.def.color });
@@ -514,6 +760,19 @@ export class Arena {
       boss.hp = 0;
       boss.dead = true;
       this.bossShots = [];
+      // Dying with a ball in its grip must not keep the ball: the boss stops
+      // updating the moment it is dead, and the ball would hang there forever.
+      if (boss.grabT > 0) {
+        boss.grabT = 0;
+        for (const b of this.balls) {
+          if (!b.captured) continue;
+          b.captured = false;
+          b.vx = this.rng.range(-0.5, 0.5);
+          b.vy = -1;
+          setSpeed(b, b.baseSpeed);
+          avoidShallow(b);
+        }
+      }
       this.shake = 1;
       this.flash = 1;
       this.addXp(600);
@@ -594,6 +853,9 @@ export class Arena {
     }
 
     this.updateBalls(dt);
+    this.updateBasement(dt, input, input2);
+    // After the balls have moved: the attic reacts to where they ended up.
+    this.updateProps(dt);
     this.updateLasers(dt);
     this.updatePowerups(dt);
     this.updateBricks(dt);
@@ -607,6 +869,15 @@ export class Arena {
     // On a boss level clearing the bricks only strips the shield: the level
     // ends when the boss does.
     if (this.boss && !this.boss.dead) return;
+
+    // And once it does, the level is over whatever is left standing. A boss
+    // spends the fight dropping rows, so demanding an empty field afterwards
+    // would mean mopping up its own debris to be allowed to win.
+    if (this.boss?.dead && this.lives > 0) {
+      this.state = 'cleared';
+      this.events.push({ t: 'cleared' });
+      return;
+    }
 
     // Losing the last ball on the same tick that empties the field counts as death.
     if (this.remaining <= 0 && this.lives > 0) {
@@ -714,6 +985,7 @@ export class Arena {
       debuff: null,
       debuffT: 0,
       debuffCharge: 0,
+      captured: false,
       trail: [],
     };
   }
@@ -819,6 +1091,8 @@ export class Arena {
 
     for (let i = this.balls.length - 1; i >= 0; i--) {
       const ball = this.balls[i];
+      // A ball in the boss's grip has no physics: it is scenery until released.
+      if (ball.captured) continue;
       if (ball.pierceT > 0) ball.pierceT -= dt;
       if (ball.fireT > 0) ball.fireT -= dt;
       if (ball.typeT > 0) {
@@ -835,6 +1109,7 @@ export class Arena {
       if (ball.held !== null) continue;
 
       if (ball.type === 'void') this.voidPull(ball, dt);
+      this.magnetPull(ball, dt);
       const speed = clamp(ball.baseSpeed * globalMul * BALL_TYPES[ball.type].speed, 60, BALL_SPEED_MAX);
       setSpeed(ball, speed);
       avoidShallow(ball);
@@ -865,6 +1140,11 @@ export class Arena {
             ball.baseSpeed = Math.min(BALL_SPEED_MAX, ball.baseSpeed * 1.1);
           }
           this.events.push({ t: 'hit', x: ball.x, y: ARENA_H - 20, color: barrier ? '#3ddc84' : '#4de2ff' });
+        } else if (this.basement) {
+          // Not lost, only downstairs. The basement hands it back if the player
+          // can flip it out through the ceiling.
+          this.balls.splice(i, 1);
+          this.basement.take(ball);
         } else {
           this.balls.splice(i, 1);
           this.events.push({ t: 'ballLost', x: ball.x });
@@ -872,7 +1152,99 @@ export class Arena {
       }
     }
 
-    if (this.balls.length === 0 && this.state === 'play') this.loseLife();
+    // A ball still bouncing around the basement is still in play.
+    if (this.balls.length === 0 && !this.basement?.busy && this.state === 'play') this.loseLife();
+  }
+
+  /** The pinball floor runs on the same keys as the paddle: while the ball is
+   *  down there the paddle has nothing to do anyway. */
+  private updateBasement(dt: number, input: ArenaInput, input2?: ArenaInput): void {
+    const bs = this.basement;
+    if (!bs) return;
+    const left = input.left || input2?.left || false;
+    const right = input.right || input2?.right || false;
+    for (const ball of bs.update(dt, left, right)) {
+      // Back upstairs with its own speed restored on the next frame.
+      ball.y = ARENA_H - ball.r - 1;
+      this.balls.push(ball);
+    }
+    for (const e of bs.drainEvents()) {
+      switch (e.t) {
+        case 'bumper':
+          // Nothing down there pays on the spot — it all rides on the pot.
+          this.events.push({ t: 'prop', kind: 'bumper', x: e.x, y: e.y, score: 0 });
+          break;
+        case 'target':
+          this.events.push({ t: 'prop', kind: 'target', x: e.x, y: e.y, score: 0 });
+          break;
+        case 'word':
+          this.events.push({ t: 'targetsDown', x: e.x, y: e.y });
+          break;
+        case 'spin':
+          this.events.push({ t: 'prop', kind: 'spinner', x: bs.spinner.x, y: bs.spinner.y, score: 0 });
+          break;
+        case 'lockIn':
+          this.events.push({ t: 'prop', kind: 'lock', x: e.x, y: e.y, score: 0 });
+          break;
+        case 'multiball': {
+          // The ball is already on its way back up; it comes home with a twin.
+          const twin = this.makeBall(e.x, ARENA_H - BALL_R - 2, 0);
+          twin.vx = Math.abs(twin.vx) || 120;
+          twin.vy = -Math.abs(twin.vy || 300);
+          this.balls.push(twin);
+          this.events.push({ t: 'multiball', x: e.x, y: e.y });
+          break;
+        }
+        case 'saved':
+          this.score += e.pot;
+          this.addXp(e.pot / 8);
+          this.events.push({
+            t: 'cellarPot',
+            x: e.x,
+            y: ARENA_H - 40,
+            amount: e.pot,
+            won: true,
+            double: e.double,
+          });
+          break;
+        case 'prize':
+          // The bandit pays in the arena's own currency; the pot ones it
+          // settles for itself downstairs.
+          if (e.kind === 'life') this.lives = Math.min(9, this.lives + 1);
+          if (e.kind === 'super') this.energy = ENERGY_MAX;
+          if (e.kind === 'capsule') this.dropReward(this.paddleX, GRID_TOP + 40);
+          this.events.push({ t: 'slot', kind: e.kind, x: this.width / 2, y: ARENA_H - 60 });
+          break;
+        case 'lost':
+          if (e.pot > 0) this.events.push({ t: 'cellarPot', x: e.x, y: ARENA_H - 40, amount: e.pot, won: false });
+          this.events.push({ t: 'ballLost', x: e.x });
+          if (this.balls.length === 0 && !bs.busy && this.state === 'play') this.loseLife();
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  /** Magnetism bends a falling ball towards the paddle. The skill has always
+   *  said it attracts the ball as well as the capsules; until now it only ever
+   *  moved the capsules. Speed is set from `baseSpeed` right after this, so
+   *  what the pull changes is the ball's heading, never its pace. */
+  private magnetPull(ball: Ball, dt: number): void {
+    if (this.timers.magnetSkill <= 0 || ball.vy <= 0) return;
+    // Only on the way down, and only over the lower half: a magnet that grabs
+    // the ball off the bricks would play the level for you.
+    if (ball.y < ARENA_H * 0.45) return;
+    const dx = this.paddleX - ball.x;
+    const rank = this.skills.find((s) => s.id === 'magnet')?.rank ?? 1;
+    // The pull fades out as the ball comes over the paddle. Cutting it off
+    // sharply instead let the stronger rank swing the ball straight past the
+    // middle and out the other side, so magnet III caught less than magnet I.
+    const near = Math.min(1, Math.abs(dx) / Math.max(48, this.paddleW));
+    const turn = MAGNET_TURN * (rank >= 3 ? 2 : 1) * near * dt;
+    // Small-angle turn of the heading: the speed is reset from baseSpeed right
+    // after this, so what survives is the change of direction.
+    ball.vx += Math.sign(dx) * Math.hypot(ball.vx, ball.vy) * turn;
   }
 
   private collideWalls(ball: Ball): void {
@@ -1068,7 +1440,7 @@ export class Arena {
       return;
     }
     brick.hp -= dmg;
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_DAMAGE * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_DAMAGE * this.stats.energyMul);
 
     if (brick.hp > 0) {
       this.events.push({ t: 'hit', x: brick.x + this.brickW / 2, y: brick.y + BRICK_H / 2, color: brick.kind.color });
@@ -1131,6 +1503,23 @@ export class Arena {
         this.damageBrick(other, 2);
       }
     }
+
+    // A blast next to the boss hurts it too. Everything else in the game that
+    // deals damage reaches the boss, and an explosive brick going off against
+    // its hull obviously should — it also turns the wall a boss drops on itself
+    // into a weapon.
+    const boss = this.boss;
+    if (boss && !boss.dead) {
+      const radius = radiusCells * this.brickW;
+      const nx = Math.max(boss.x - boss.def.w / 2, Math.min(cx, boss.x + boss.def.w / 2));
+      const ny = Math.max(boss.y, Math.min(cy, boss.y + boss.def.h));
+      const dx = cx - nx;
+      const dy = cy - ny;
+      if (dx * dx + dy * dy <= radius * radius && this.blastCd <= 0) {
+        this.blastCd = BOSS_BLAST_COOLDOWN;
+        this.damageBoss(EXPLOSION_BOSS_DAMAGE, cx, cy);
+      }
+    }
   }
 
   private rollDrop(brick: Brick, cx: number, cy: number): void {
@@ -1141,6 +1530,7 @@ export class Arena {
     for (const def of POWERUP_LIST) {
       // Sabotage capsules exist only where there is someone to sabotage.
       if (def.pvpOnly && this.mode !== 'versus') continue;
+      if (def.raceOnly && this.mode !== 'race') continue;
       for (let i = 0; i < def.weight; i++) pool.push(def.id);
     }
     const id = this.rng.pick(pool);
@@ -1200,6 +1590,22 @@ export class Arena {
     this.collect(id, this.paddleX, PADDLE_Y - 20);
   }
 
+  /** Blows every energy node at once — what the ally's gift card does. Nothing
+   *  else in the game can do this, which is the point of the card. */
+  breakShieldNodes(): number {
+    let broken = 0;
+    for (const b of this.bricks) {
+      if (!b.alive || b.kind.code !== 'k') continue;
+      this.destroyBrick(b);
+      broken++;
+    }
+    if (broken) {
+      this.shake = 1;
+      this.flash = 0.7;
+    }
+    return broken;
+  }
+
   /** Admin cheat: wipe every breakable brick, ending the level immediately. */
   clearField(): void {
     for (const b of this.bricks) {
@@ -1210,7 +1616,7 @@ export class Arena {
   private collect(id: PowerupId, x: number, y: number): void {
     const def = POWERUPS[id];
     this.events.push({ t: 'powerup', id, x, y });
-    this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PER_POWERUP * this.stats.energyMul);
+    this.gainEnergy(ENERGY_PER_POWERUP * this.stats.energyMul);
     this.score += 25;
 
     switch (id) {
@@ -1253,7 +1659,7 @@ export class Arena {
         this.addXp(120 * this.stats.xpMul);
         break;
       case 'energy':
-        this.energy = Math.min(ENERGY_MAX, this.energy + 35);
+        this.gainEnergy(35);
         break;
       case 'ballLava':
       case 'ballAqua':
@@ -1309,7 +1715,10 @@ export class Arena {
       const brick = this.cellAt(col, row);
       if (brick) {
         this.damageBrick(brick, this.spec ? SPECS[this.spec].laserDamage ?? 1 : 1);
-        this.lasers.splice(i, 1);
+        // Plasma goes through an indestructible block rather than dying on it —
+        // otherwise a single row of them shrugs off the whole super, and the
+        // bricks sheltering behind the wall are the ones you needed to reach.
+        if (!(l.plasma && brick.kind.hp < 0)) this.lasers.splice(i, 1);
       }
     }
   }
@@ -1320,7 +1729,18 @@ export class Arena {
     this.skills = ids
       .filter((id): id is SkillId => id !== null)
       .slice(0, SKILL_SLOTS)
-      .map((id) => ({ id, rank: Math.min(MAX_RANK, Math.max(1, ranks[id] ?? 1)), cd: 0, activeT: 0 }));
+      .map((id) => {
+        const rank = Math.min(MAX_RANK, Math.max(1, ranks[id] ?? 1));
+        // A skill marked for warm-up opens the level charging rather than
+        // loaded: the heavy openers should be earned inside the level. Ranks
+        // shorten the wait along with the cooldown they came from.
+        //
+        // Except in the race, where a turn is short and shared: waiting out a
+        // warm-up in front of five other people is dead air, so there every
+        // skill starts loaded.
+        const cd = SKILLS[id].warmup && this.mode !== 'race' ? skillCooldown(SKILLS[id], rank) : 0;
+        return { id, rank, cd, activeT: 0 };
+      });
   }
 
   upgradeSkill(id: SkillId): void {
@@ -1508,6 +1928,16 @@ export class Arena {
 
   // ----------------------------------------------------------------- супер --
 
+  /** Every charge the super gets goes through here, so a super that fills at
+   *  its own pace only has to say so once, in its definition. */
+  private gainEnergy(amount: number): void {
+    // The race fills twice as fast. A turn there lasts a couple of minutes and
+    // everyone is watching it: a bar that never quite fills is the opposite of
+    // what the mode is for.
+    const mul = (SUPERS[this.superId].chargeMul ?? 1) * (this.mode === 'race' ? 2 : 1);
+    this.energy = Math.min(ENERGY_MAX, this.energy + amount * mul);
+  }
+
   get superReady(): boolean {
     return this.energy >= ENERGY_MAX && !this.active;
   }
@@ -1566,8 +1996,8 @@ export class Arena {
       a.tick = 0.1;
       const half = this.paddleW / 2;
       const x = this.paddleX + this.rng.range(-half, half);
-      this.lasers.push({ x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
-      this.lasers.push({ x: this.width - x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3 });
+      this.lasers.push({ x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3, plasma: true });
+      this.lasers.push({ x: this.width - x, y: PADDLE_Y, vy: -LASER_SPEED * 1.3, plasma: true });
     }
 
     if (a.id === 'singularity' && a.tick <= 0) {
@@ -1631,11 +2061,13 @@ export class Arena {
       this.grid[b.row * this.cols + b.col] = b;
     }
 
-    // Boss pushes bring a mixed wall rather than a grey slab of garbage.
+    // Boss pushes bring a mixed wall rather than a grey slab of garbage, and it
+    // is thick with charges: a blast reaches the boss, so the wall it drops on
+    // itself is also the player's way back into the fight.
     const palette: BrickCode[] = forceCode
       ? [forceCode]
       : this.boss
-        ? ['b', 'b', 'n', 'n', 't', 's', 'e', 'g', 'r']
+        ? ['b', 'n', 'n', 't', 'e', 'e', 'e', 's', 'g', 'r']
         : ['b'];
 
     for (let c = 0; c < this.cols; c++) {
@@ -1652,6 +2084,7 @@ export class Arena {
         regenTimer: 0,
         regensLeft: 0,
         flash: 1,
+        pushed: true,
       };
       this.bricks.push(brick);
       this.grid[c] = brick;
@@ -1684,7 +2117,7 @@ export class Arena {
 
   private onLevelUp(): void {
     if (this.stats.lifePerLevel) this.lives++;
-    this.energy = Math.min(ENERGY_MAX, this.energy + 15);
+    this.gainEnergy(15);
     this.events.push({ t: 'levelup', level: this.xpLevel });
 
     // Level 5 is the fork in the build: pick a specialisation instead of a perk.
@@ -1743,7 +2176,7 @@ export class Arena {
     perk.apply(this.stats);
     this.perksTaken.set(perk.id, (this.perksTaken.get(perk.id) ?? 0) + 1);
     if (perk.instant?.lives) this.lives += perk.instant.lives;
-    if (perk.instant?.energy) this.energy = Math.min(ENERGY_MAX, this.energy + perk.instant.energy);
+    if (perk.instant?.energy) this.gainEnergy(perk.instant.energy);
     if (perk.instant?.balls) this.addBall();
     if (perk.id === 'bulwark') this.shields += 2;
     this.draft = [];
@@ -1754,6 +2187,7 @@ export class Arena {
   // ------------------------------------------------------------------ life --
 
   private loseLife(): void {
+    this.basement?.clear();
     if (this.god) {
       this.balls = [];
       this.state = 'serve';

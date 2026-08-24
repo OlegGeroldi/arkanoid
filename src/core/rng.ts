@@ -2,9 +2,13 @@
  *  players the same seed and get identical power-up rolls. */
 export class Rng {
   private s: number;
+  /** The seed this generator started from. Handy for deriving sibling streams
+   *  that have to line up on another machine. */
+  readonly seedValue: number;
 
   constructor(seed = Date.now() >>> 0) {
     this.s = seed >>> 0;
+    this.seedValue = this.s;
   }
 
   next(): number {

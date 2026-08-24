@@ -14,6 +14,7 @@ export type PowerupId =
   | 'pierce'
   | 'xp'
   | 'energy'
+  | 'card'
   | 'ballLava'
   | 'ballAqua'
   | 'ballLaser'
@@ -39,6 +40,9 @@ export interface PowerupDef {
   debuff?: DebuffId;
   /** Never drops outside PvP. */
   pvpOnly?: boolean;
+  /** Never drops outside the race, where it stocks a card instead of doing
+   *  anything to the field. */
+  raceOnly?: boolean;
 }
 
 // Filled below with the sabotage capsules, hence the partial type here.
@@ -57,6 +61,9 @@ const BASE_POWERUPS: Partial<Record<PowerupId, PowerupDef>> = {
   pierce: { id: 'pierce', letter: 'X', name: 'Пробой', desc: 'Мяч прошивает кирпичи', color: '#ff7a3d', weight: 5, duration: 9 },
   xp: { id: 'xp', letter: 'O', name: 'Опыт', desc: 'Сразу порция опыта', color: '#ffd24d', weight: 9 },
   energy: { id: 'energy', letter: 'U', name: 'Энергия', desc: '+35 к заряду супера', color: '#b06bff', weight: 8 },
+  // Race only: does nothing to the field, it goes into your stock of cards to
+  // throw at other people's turns. Power there is earned at the paddle here.
+  card: { id: 'card', letter: '★', name: 'Карта', desc: 'Карта в запас — бросите её в чужой ход', color: '#ffd24d', weight: 14, raceOnly: true },
 
   // Elemental balls: these recolour every ball in play and change how it hits.
   ballLava: { id: 'ballLava', letter: 'M', name: 'Лава-болл', desc: 'Огненный пробивающий мяч', color: '#ff6a2b', weight: 6, ball: 'lava' },

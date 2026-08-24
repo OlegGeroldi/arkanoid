@@ -21,6 +21,8 @@ import { net } from '../net/client';
 import { routeChoices, ROUTES, SEGMENT, segmentOf, type RouteDef, type RouteId } from '../core/routes';
 import { BOSS_DEFEAT, BOSS_INTRO, cycleLine, FINALE, PROLOGUE, ROUTE_LORE, type StoryEntry } from '../core/story';
 import { generateLevel } from '../core/levelGen';
+import { BASEMENT_H } from '../core/basement';
+import { drawBasement } from '../render/basementRender';
 
 const HUD_W = 244;
 const GAP = 16;
@@ -49,6 +51,8 @@ export interface SoloOptions {
   ngPlus?: number;
   /** Abilities to equip; defaults to the profile's loadout. */
   skills?: (SkillId | null)[];
+  /** Play on two floors: a pinball cellar catches balls that pass the paddle. */
+  basement?: boolean;
 }
 
 export function soloScene(app: App, opts: SoloOptions): Scene {
@@ -68,6 +72,7 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   const startStats = resume?.stats ?? { ...baseStats(), xpMul: ngXpMul(cycle) };
   let arena = new Arena({
     level: levels[index],
+    basement: opts.basement,
     superId: resume?.superId ?? opts.superId,
     mode: 'solo',
     lives: resume?.lives ?? opts.lives,
@@ -87,6 +92,11 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
   let fx = new ArenaFx();
   const stepper = new FixedStepper();
   let layout = { scale: 1, ox: 0, oy: 0 };
+  /** How far the view has slid down towards the cellar, in arena units. The
+   *  cellar is a floor of its own, not a strip under the field: while the ball
+   *  is down there the screen belongs to it, and it slides back the moment the
+   *  ball is flipped up. */
+  let camY = 0;
   let paused = false;
   let finished = false;
   /** True while the between-levels panel is on screen: it must be built once,
@@ -559,6 +569,11 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       // Speed multiplier feeds the clock, not the physics: every timer, drop and
       // bounce scales together, so the game stays exactly itself, just faster.
       stepper.step(dt * speed, (sdt, first) => arena.update(sdt, edgeOnce(input, first)));
+      // Follow the ball downstairs only when there is nothing left to watch
+      // upstairs — during a multiball the brick field keeps the camera.
+      const wantCam = arena.basement && arena.basement.busy && arena.balls.length === 0 ? BASEMENT_H : 0;
+      camY += (wantCam - camY) * Math.min(1, dt * 7);
+
       const events = arena.drainEvents();
       fx.consume(events);
       sfx.consume(events, arena.combo);
@@ -575,7 +590,9 @@ export function soloScene(app: App, opts: SoloOptions): Scene {
       ctx.beginPath();
       ctx.rect(0, 0, ARENA_W, ARENA_H);
       ctx.clip();
+      ctx.translate(0, -camY);
       drawArena(ctx, arena, fx, t, !app.input.locked);
+      if (arena.basement) drawBasement(ctx, arena.basement, t, camY / BASEMENT_H);
       ctx.restore();
 
       drawHud(ctx, arena, ARENA_W + GAP, 0, HUD_W, SCENE_H, {
