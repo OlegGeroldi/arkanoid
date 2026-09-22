@@ -47,6 +47,13 @@ export const P2_KEYS: Bindings = {
 /** Keys that steer a paddle — pressing one takes control away from the mouse. */
 const MOVEMENT_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD']);
 
+/** True while an overlay text field owns the keystroke — an input/textarea or
+ *  anything contenteditable. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable;
+}
+
 /** Physical-key code for an event. Some environments (remote input, a few
  *  virtual keyboards) send an empty `code`, so fall back to deriving one from
  *  `key` — layout-independent bindings still work everywhere else. */
@@ -132,6 +139,12 @@ export class InputHub {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
+    // Typing into a menu/editor field must behave like a normal text input —
+    // this listener is global (it has to be, for keys to reach the game while
+    // the canvas itself never has focus), so without this guard every space
+    // or arrow key typed into an overlay input/textarea would be swallowed as
+    // a game control instead of moving the caret or inserting a character.
+    if (isTypingTarget(e.target)) return;
     const code = codeOf(e);
     // Arrows/space scroll the page otherwise.
     if (code.startsWith('Arrow') || code === 'Space') e.preventDefault();

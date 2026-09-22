@@ -496,7 +496,7 @@ function drawSkillEffects(ctx: CanvasRenderingContext2D, arena: Arena, t: number
     ctx.fillStyle = '#ff7a3d';
     ctx.font = `800 12px ${FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText(`МОЛОТ ×${arena.hammerHits}`, arena.width / 2, PADDLE_Y - 30);
+    ctx.fillText(`HAMMER ×${arena.hammerHits}`, arena.width / 2, PADDLE_Y - 30);
     ctx.restore();
   }
 }
@@ -582,7 +582,7 @@ function drawBoss(ctx: CanvasRenderingContext2D, arena: Arena, t: number): void 
   ctx.fillText(def.name.toUpperCase(), WALL + 6, 15);
   ctx.textAlign = 'right';
   ctx.fillStyle = shielded ? '#ffd24d' : withAlpha(def.color, 0.9);
-  ctx.fillText(shielded ? 'ЩИТ АКТИВЕН' : `${Math.ceil(boss.hp)} / ${boss.maxHp}`, arena.width - WALL - 6, 15);
+  ctx.fillText(shielded ? 'SHIELD ACTIVE' : `${Math.ceil(boss.hp)} / ${boss.maxHp}`, arena.width - WALL - 6, 15);
   ctx.textAlign = 'left';
   ctx.restore();
 
@@ -678,7 +678,7 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.font = `600 15px ${FONT}`;
-    ctx.fillText('Огонь — запуск мяча', arena.width / 2, PADDLE_Y - 46);
+    ctx.fillText('Fire — launch ball', arena.width / 2, PADDLE_Y - 46);
     ctx.restore();
   }
 
@@ -689,7 +689,7 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,210,77,0.75)';
     ctx.font = `600 12px ${FONT}`;
-    ctx.fillText('Клик по полю — мышь остаётся в игре', arena.width / 2, PADDLE_Y + 34);
+    ctx.fillText('Click the field — mouse stays in the game', arena.width / 2, PADDLE_Y + 34);
     ctx.restore();
   }
 
@@ -700,10 +700,10 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd24d';
     ctx.font = `800 26px ${FONT}`;
-    ctx.fillText(`УРОВЕНЬ ${arena.xpLevel}`, arena.width / 2, 150);
+    ctx.fillText(`LEVEL ${arena.xpLevel}`, arena.width / 2, 150);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = `500 13px ${FONT}`;
-    ctx.fillText('Выберите усиление', arena.width / 2, 174);
+    ctx.fillText('Pick a perk', arena.width / 2, 174);
 
     const drawCard = (i: number, icon: string, title: string, desc: string, accent: string): void => {
       const y = 210 + i * 108;
@@ -742,7 +742,7 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
       drawCard(
         arena.draft.length,
         def.icon,
-        `${def.name} — ранг ${arena.draftSkill.toRank}`,
+        `${def.name} — rank ${arena.draftSkill.toRank}`,
         rankText,
         def.color,
       );
@@ -751,7 +751,7 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = `500 12px ${FONT}`;
-    ctx.fillText(`Авто-выбор через ${arena.draftTimer.toFixed(1)} с`, arena.width / 2, ARENA_H - 60);
+    ctx.fillText(`Auto-picks in ${arena.draftTimer.toFixed(1)}s`, arena.width / 2, ARENA_H - 60);
     ctx.restore();
   }
 
@@ -762,10 +762,10 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd24d';
     ctx.font = `800 24px ${FONT}`;
-    ctx.fillText('РАЗВИЛКА ПУТИ', arena.width / 2, 140);
+    ctx.fillText('FORK IN THE PATH', arena.width / 2, 140);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = `500 13px ${FONT}`;
-    ctx.fillText('Выберите специализацию на весь забег', arena.width / 2, 164);
+    ctx.fillText('Pick a specialization for the whole run', arena.width / 2, 164);
 
     SPEC_LIST.forEach((spec, i) => {
       const y = 200 + i * 112;
@@ -799,7 +799,7 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = `500 12px ${FONT}`;
-    ctx.fillText(`Случайный выбор через ${arena.draftTimer.toFixed(1)} с`, arena.width / 2, ARENA_H - 54);
+    ctx.fillText(`Random pick in ${arena.draftTimer.toFixed(1)}s`, arena.width / 2, ARENA_H - 54);
     ctx.restore();
   }
 
@@ -810,7 +810,7 @@ function drawStateOverlay(ctx: CanvasRenderingContext2D, arena: Arena, mouseFree
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ff4d6d';
     ctx.font = `800 34px ${FONT}`;
-    ctx.fillText('ПОРАЖЕНИЕ', arena.width / 2, ARENA_H / 2);
+    ctx.fillText('DEFEAT', arena.width / 2, ARENA_H / 2);
     ctx.restore();
   }
 }
@@ -906,7 +906,7 @@ export function drawHud(
   // Lives
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = `600 11px ${FONT}`;
-  ctx.fillText('ЖИЗНИ', pad, cy);
+  ctx.fillText('LIVES', pad, cy);
   for (let i = 0; i < Math.min(arena.lives, 8); i++) {
     ctx.fillStyle = '#ff5fa2';
     ctx.beginPath();
@@ -922,7 +922,7 @@ export function drawHud(
   // XP bar
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = `600 11px ${FONT}`;
-  ctx.fillText(`ОПЫТ · ур. ${arena.xpLevel}`, pad, cy);
+  ctx.fillText(`XP · lvl ${arena.xpLevel}`, pad, cy);
   cy += 8;
   bar(ctx, pad, cy, w - pad * 2, 8, arena.xpInto / arena.xpNeed, '#4de2ff');
   cy += 28;
@@ -932,14 +932,14 @@ export function drawHud(
   const def = SUPERS[arena.superId];
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = `600 11px ${FONT}`;
-  ctx.fillText(`СУПЕР · ${def.name}`, pad, cy);
+  ctx.fillText(`SUPER · ${def.name}`, pad, cy);
   cy += 8;
   bar(ctx, pad, cy, w - pad * 2, 10, arena.energy / ENERGY_MAX, def.color, ready);
   if (ready) {
     ctx.fillStyle = def.color;
     ctx.font = `800 11px ${FONT}`;
     ctx.textAlign = 'right';
-    ctx.fillText('ГОТОВ!', w - pad, cy - 2);
+    ctx.fillText('READY!', w - pad, cy - 2);
     ctx.textAlign = 'left';
   }
   cy += 30;
@@ -948,7 +948,7 @@ export function drawHud(
   if (arena.skills.length) {
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.font = `600 11px ${FONT}`;
-    ctx.fillText('СКИЛЛЫ', pad, cy);
+    ctx.fillText('SKILLS', pad, cy);
     cy += 6;
     arena.skills.forEach((slot, i) => {
       const def = SKILLS[slot.id];
@@ -993,7 +993,7 @@ export function drawHud(
       ctx.fillText(`${def.name}`, cx + 22, cyy - 2);
       ctx.fillStyle = withAlpha(def.color, 0.85);
       ctx.font = `600 10px ${FONT}`;
-      ctx.fillText(ready ? `ранг ${slot.rank} · готов` : `${slot.cd.toFixed(1)} с`, cx + 22, cyy + 12);
+      ctx.fillText(ready ? `rank ${slot.rank} · ready` : `${slot.cd.toFixed(1)}s`, cx + 22, cyy + 12);
     });
     cy += 68;
   }
@@ -1016,7 +1016,7 @@ export function drawHud(
   } else {
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.font = `600 11px ${FONT}`;
-    ctx.fillText('ВРЕМЯ УРОВНЯ', pad, cy);
+    ctx.fillText('LEVEL TIME', pad, cy);
     ctx.fillStyle = '#ffd24d';
     ctx.font = `700 13px ${FONT}`;
     ctx.textAlign = 'right';
@@ -1047,31 +1047,31 @@ export function drawHud(
       active.push([el.name, elemental.typeT, el.color]);
     }
     const tm = arena.timers;
-    if (tm.expand > 0) active.push(['Расширение', tm.expand, '#4de2ff']);
-    if (tm.shrink > 0) active.push(['Сжатие', tm.shrink, '#ff4d6d']);
-    if (tm.laser > 0) active.push(['Лазер', tm.laser, '#ff7a3d']);
-    if (tm.catch > 0) active.push(['Захват', tm.catch, '#3ddc84']);
-    if (tm.slow > 0) active.push(['Замедление', tm.slow, '#7c6cff']);
-    if (tm.speed > 0) active.push(['Ускорение', tm.speed, '#ff4d6d']);
-    if (tm.pierce > 0) active.push(['Пробой', tm.pierce, '#ff7a3d']);
-    if (tm.invert > 0) active.push(['ИНВЕРСИЯ', tm.invert, '#ff4d6d']);
-    if (tm.frost > 0) active.push(['МОРОЗ', tm.frost, DEBUFFS.frost.color]);
-    if (tm.brittle > 0) active.push(['ХРУПКОСТЬ', tm.brittle, DEBUFFS.brittle.color]);
-    if (tm.repel > 0) active.push(['АНТИМАГНИТ', tm.repel, DEBUFFS.repel.color]);
-    if (tm.jam > 0) active.push(['ГЛУШИЛКА', tm.jam, DEBUFFS.jam.color]);
+    if (tm.expand > 0) active.push(['Expand', tm.expand, '#4de2ff']);
+    if (tm.shrink > 0) active.push(['Shrink', tm.shrink, '#ff4d6d']);
+    if (tm.laser > 0) active.push(['Laser', tm.laser, '#ff7a3d']);
+    if (tm.catch > 0) active.push(['Catch', tm.catch, '#3ddc84']);
+    if (tm.slow > 0) active.push(['Slow', tm.slow, '#7c6cff']);
+    if (tm.speed > 0) active.push(['Speed', tm.speed, '#ff4d6d']);
+    if (tm.pierce > 0) active.push(['Pierce', tm.pierce, '#ff7a3d']);
+    if (tm.invert > 0) active.push(['INVERT', tm.invert, '#ff4d6d']);
+    if (tm.frost > 0) active.push(['FROST', tm.frost, DEBUFFS.frost.color]);
+    if (tm.brittle > 0) active.push(['BRITTLE', tm.brittle, DEBUFFS.brittle.color]);
+    if (tm.repel > 0) active.push(['ANTI-MAGNET', tm.repel, DEBUFFS.repel.color]);
+    if (tm.jam > 0) active.push(['JAMMED', tm.jam, DEBUFFS.jam.color]);
     const armed = arena.balls.find((b) => b.debuff);
     if (armed?.debuff) {
       const def = DEBUFFS[armed.debuff];
       active.push([`${def.icon} ${def.name} ${armed.debuffCharge}/${def.perCharge}`, armed.debuffT, def.color]);
     }
-    if (tm.fog > 0) active.push(['ПОМЕХИ', tm.fog, '#8892a4']);
-    if (tm.haste > 0) active.push(['РАЗГОН', tm.haste, '#ff4d6d']);
-    if (arena.shields > 0) active.push([`Барьер x${arena.shields}`, 0, '#4de2ff']);
+    if (tm.fog > 0) active.push(['FOG', tm.fog, '#8892a4']);
+    if (tm.haste > 0) active.push(['HASTE', tm.haste, '#ff4d6d']);
+    if (arena.shields > 0) active.push([`Shield x${arena.shields}`, 0, '#4de2ff']);
 
     if (active.length) {
       ctx.fillStyle = 'rgba(255,255,255,0.45)';
       ctx.font = `600 11px ${FONT}`;
-      ctx.fillText('АКТИВНО', pad, cy);
+      ctx.fillText('ACTIVE', pad, cy);
       cy += 14;
       for (const [name, time, color] of active.slice(0, 7)) {
         ctx.fillStyle = color;
@@ -1086,7 +1086,7 @@ export function drawHud(
     if (arena.perksTaken.size) {
       ctx.fillStyle = 'rgba(255,255,255,0.45)';
       ctx.font = `600 11px ${FONT}`;
-      ctx.fillText('УСИЛЕНИЯ', pad, cy);
+      ctx.fillText('PERKS', pad, cy);
       cy += 16;
       let px = pad;
       for (const [id, n] of arena.perksTaken) {

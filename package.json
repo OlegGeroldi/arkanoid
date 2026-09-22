@@ -1,9 +1,9 @@
 {
-  "name": "neonoid",
+  "name": "team-quiz-arkanoid",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Arkanoid-like brick breaker with XP progression, super strikes, level editor and local PvP",
+  "description": "Team-vs-team party game: an Arkanoid pilot per team plays a level each round while the rest of the team plays a Jeopardy-style board and spends credits on a live shop",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

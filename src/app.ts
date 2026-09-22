@@ -1,18 +1,10 @@
 import { MAX_FRAME } from './core/constants';
 import { InputHub } from './game/input';
-import {
-  activeProfile,
-  loadStore,
-  ngBallSpeedMul,
-  saveStore,
-  type Profile,
-  type Store,
-} from './core/storage';
+import { activeProfile, loadStore, saveStore, type Profile, type Store } from './core/storage';
 import { sfx } from './audio/sfx';
 import { music } from './audio/music';
-import { CAMPAIGN_LEVELS, RACE_LEVELS } from './core/campaignLevels';
+import { RACE_LEVELS } from './core/campaignLevels';
 import { net } from './net/client';
-import { hall } from './core/hall';
 import type { LevelData } from './core/level';
 
 export interface Scene {
@@ -107,8 +99,6 @@ export class App {
   /** Joins the LAN room when the game was served by the room server. Opened as
    *  a file or from a static host this stays offline and nothing else changes. */
   private initNetwork(): void {
-    hall.uplink = (entry) => net.submitHall(entry);
-    net.subscribe(() => hall.mergeRemote(net.serverHall));
     net.connect(this.profile.name);
   }
 
@@ -146,29 +136,10 @@ export class App {
     saveStore(this.store);
   }
 
-  /** Persists the whole store — profile list, active player, campaign edits. */
+  /** Persists the whole store — profile list, active player. */
   commitStore(mutate?: (s: Store) => void): void {
     mutate?.(this.store);
     saveStore(this.store);
-    this.campaignCache = null;
-  }
-
-  private campaignCache: LevelData[] | null = null;
-  private campaignCacheCycle = -1;
-
-  /** The campaign as it should be played: generated levels, admin edits laid
-   *  over the top, and the ball sped up for each New Game+ cycle. */
-  campaignLevels(): LevelData[] {
-    const cycle = this.profile.ngPlus;
-    if (!this.campaignCache || this.campaignCacheCycle !== cycle) {
-      const speedMul = ngBallSpeedMul(cycle);
-      this.campaignCache = CAMPAIGN_LEVELS.map((level, i) => {
-        const base = this.store.campaignOverrides[String(i)] ?? level;
-        return cycle === 0 ? base : { ...base, ballSpeed: (base.ballSpeed ?? 1) * speedMul };
-      });
-      this.campaignCacheCycle = cycle;
-    }
-    return this.campaignCache;
   }
 
   /** The race's own hundred: the same track, drawn with the other picture set.

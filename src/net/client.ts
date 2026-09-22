@@ -1,26 +1,6 @@
-import type { HallEntry } from '../core/hall';
-
-/** A light snapshot of what another player is doing, for spectating. */
-export interface PeerProgress {
-  level: number;
-  score: number;
-  lives: number;
-  xpLevel: number;
-  mode: string;
-  /** 0..1 of the current level's bricks removed. */
-  cleared: number;
-}
-
-export interface Peer {
-  id: string;
-  name: string;
-  progress: PeerProgress | null;
-}
-
 export type NetStatus = 'offline' | 'connecting' | 'online';
 
 type Listener = () => void;
-type RelayListener = (payload: unknown, from: string) => void;
 
 /** Talks to the LAN server when the game is served from one.
  *
@@ -30,7 +10,6 @@ type RelayListener = (payload: unknown, from: string) => void;
 export class NetClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
-  private relayListeners = new Set<RelayListener>();
   private retry = 0;
   private retryTimer: number | null = null;
 
@@ -38,8 +17,6 @@ export class NetClient {
   selfId = '';
   room = '';
   name = '';
-  peers: Peer[] = [];
-  serverHall: HallEntry[] = [];
   /** Set when the page was not served by the room server. */
   unavailable = false;
   /** What the server admits it can do. An older server simply omits things, so
@@ -111,29 +88,9 @@ export class NetClient {
         case 'welcome':
           this.selfId = String(msg.id ?? '');
           this.features = Array.isArray(msg.features) ? (msg.features as string[]) : [];
-          if (Array.isArray(msg.hall)) this.serverHall = msg.hall as HallEntry[];
           break;
-        case 'joined':
-        case 'peers':
-          if (Array.isArray(msg.peers)) this.peers = msg.peers as Peer[];
-          break;
-        case 'progress': {
-          const id = String(msg.id ?? '');
-          const peer = this.peers.find((p) => p.id === id);
-          const progress = (msg.progress ?? null) as PeerProgress | null;
-          if (peer) peer.progress = progress;
-          else this.peers.push({ id, name: String(msg.name ?? '—'), progress });
-          break;
-        }
-        case 'hall':
-          if (Array.isArray(msg.hall)) this.serverHall = msg.hall as HallEntry[];
-          break;
-        case 'relay':
-          // Game modes talk to each other through this channel.
-          for (const fn of this.relayListeners) fn(msg.payload, String(msg.id ?? ''));
-          break;
-        case 'race':
-          for (const fn of this.raceListeners) fn(msg.msg);
+        case 'teamquiz':
+          for (const fn of this.teamQuizListeners) fn(msg.msg);
           break;
         default:
           break;
@@ -149,7 +106,6 @@ export class NetClient {
    *  its own rather than needing a restart. */
   private fail(): void {
     this.ws = null;
-    this.peers = [];
     this.status = 'offline';
     this.emit();
 
@@ -165,31 +121,19 @@ export class NetClient {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
-  /** Publishes what this player is doing, for the spectator list. */
-  reportProgress(progress: PeerProgress | null): void {
-    this.send({ type: 'progress', progress });
+  /** The team quiz talks to its referee on its own channel rather than
+   *  through a generic relay: the server has to read these, not just forward
+   *  them. */
+  sendTeamQuiz(msg: unknown): void {
+    this.send({ type: 'teamquiz', msg });
   }
 
-  submitHall(entry: HallEntry): void {
-    this.send({ type: 'hall', entry });
+  onTeamQuiz(fn: (msg: unknown) => void): () => void {
+    this.teamQuizListeners.add(fn);
+    return () => this.teamQuizListeners.delete(fn);
   }
 
-  relay(payload: unknown): void {
-    this.send({ type: 'relay', payload });
-  }
-
-  /** The race talks to the referee on its own channel rather than through
-   *  relay: the server has to read these, not just forward them. */
-  sendRace(msg: unknown): void {
-    this.send({ type: 'race', msg });
-  }
-
-  onRace(fn: (msg: unknown) => void): () => void {
-    this.raceListeners.add(fn);
-    return () => this.raceListeners.delete(fn);
-  }
-
-  private raceListeners = new Set<(msg: unknown) => void>();
+  private teamQuizListeners = new Set<(msg: unknown) => void>();
 
   disconnect(): void {
     this.name = '';
@@ -200,14 +144,7 @@ export class NetClient {
     this.ws?.close();
     this.ws = null;
     this.status = 'offline';
-    this.peers = [];
     this.emit();
-  }
-
-  /** Subscribes to messages other clients send with relay(). */
-  onRelay(fn: RelayListener): () => void {
-    this.relayListeners.add(fn);
-    return () => this.relayListeners.delete(fn);
   }
 
   subscribe(fn: Listener): () => void {

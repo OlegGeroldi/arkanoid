@@ -407,6 +407,9 @@ export type CardId =
   | 'steel'
   | 'jam'
   | 'weight'
+  | 'megaLife'
+  | 'timeFreeze'
+  | 'setback'
   // Gifts: rare, strong, and impossible to use on yourself. A lone racer
   // holding one is holding a paperweight.
   | 'giftPlasma'
@@ -429,7 +432,12 @@ export type CardEffect =
   | { t: 'lives'; delta: number }
   /** Blows the energy nodes holding the last boss's shield — on an ally's
    *  field, and only there. */
-  | { t: 'breakShield' };
+  | { t: 'breakShield' }
+  /** Moves a team's own track position — positive forward, negative back.
+   *  Not an arena thing at all: `applyCardEffectToArena` stays silent on it,
+   *  same as `clock`/`dice`, and the caller (the team-quiz store, which owns
+   *  `cell`) applies it directly. */
+  | { t: 'cell'; delta: number };
 
 export interface CardDef {
   id: CardId;
@@ -466,6 +474,12 @@ export const CARDS: Record<CardId, CardDef> = {
   steel: { id: 'steel', name: 'Стальной ряд', icon: '▦', color: '#9fb3c8', kind: 'debuff', weight: 3, desc: 'Сверху падает ряд стали', effect: { t: 'debuff', id: 'steel' } },
   jam: { id: 'jam', name: 'Глушилка', icon: '⌁', color: '#ffd24d', kind: 'debuff', weight: 3, desc: 'Скиллы уходят на перезарядку', effect: { t: 'debuff', id: 'jam' } },
   weight: { id: 'weight', name: 'Гиря', icon: '⚓', color: '#9fb3c8', kind: 'debuff', weight: 3, desc: '−1 к его броску кубика', effect: { t: 'dice', delta: -1 } },
+
+  // Rare and "жирные" — low weight on purpose, so they stay a surprise rather
+  // than the norm when a deck of these is drawn from at random.
+  megaLife: { id: 'megaLife', name: 'Аптечка', icon: '✚', color: '#ff5fa2', kind: 'buff', weight: 1, desc: '+10 жизней разом', effect: { t: 'lives', delta: 10 } },
+  timeFreeze: { id: 'timeFreeze', name: 'Стоп-кран', icon: '⏳', color: '#3ddc84', kind: 'buff', weight: 1, desc: '+60 секунд на часах раунда', effect: { t: 'clock', delta: 60 } },
+  setback: { id: 'setback', name: 'Откат', icon: '⏪', color: '#ff4d6d', kind: 'debuff', weight: 2, desc: 'Отбрасывает на 3 клетки назад по треку', effect: { t: 'cell', delta: -3 } },
 
   // Gifts. Rare, and they only ever leave your hand towards an ally, which is
   // the whole point: a union gets a toolkit, not just a non-aggression pact.
