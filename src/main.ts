@@ -1,3 +1,4 @@
+import './ui/show.css';
 import { App } from './app';
 import { startScene } from './ui/start';
 

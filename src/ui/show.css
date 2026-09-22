@@ -1,0 +1,25 @@
+.show-panel { max-width: 560px; margin: 6vh auto; padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; display: flex; flex-direction: column; gap: 14px; }
+.show-panel h2 { margin: 0; font-size: 26px; }
+.show-panel .row { display: flex; gap: 10px; justify-content: space-between; }
+.field { font: inherit; font-size: 20px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.3); color: var(--text); }
+.field.pin { font-size: 34px; letter-spacing: 12px; text-align: center; }
+.account-grid, .avatar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.avatar-grid { grid-template-columns: repeat(8, 1fr); }
+.account, .avatar { font: inherit; font-size: 18px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(23,182,189,.08); color: var(--text); cursor: pointer; }
+.avatar { font-size: 24px; padding: 8px; }
+.avatar.picked, .account:hover { border-color: var(--amber); background: rgba(255,210,77,.14); }
+.account.new { border-style: dashed; }
+.error { color: var(--red); margin: 0; }
+.roster { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 6px 12px; border-radius: 999px; border: 2px solid var(--c); opacity: .6; }
+.chip.ready { opacity: 1; background: color-mix(in srgb, var(--c) 20%, transparent); }
+.countdown { font-size: 28px; font-weight: 800; color: var(--amber); margin: 0; }
+.act { color: var(--violet); font-weight: 800; letter-spacing: 2px; margin: 0; }
+.standings { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.standings li { display: flex; justify-content: space-between; border-left: 4px solid var(--c); padding: 6px 10px; background: rgba(255,255,255,.03); border-radius: 8px; }
+.standings li.me { background: rgba(255,210,77,.12); }
+.manual { font-size: 14px; color: var(--muted); }
+.manual h3 { margin: 0 0 6px; color: var(--text); }
+.manual ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.start { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+.start h1 { font-size: clamp(48px, 9vw, 110px); margin: 0; letter-spacing: 6px; }
