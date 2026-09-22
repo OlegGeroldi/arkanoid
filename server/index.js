@@ -5,9 +5,12 @@ import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { createShowEngine } from './show/engine.js';
+import { createAccountStore } from './show/accounts.js';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DIST = join(ROOT, 'dist');
+const DATA_DIR = join(ROOT, 'server', 'data');
 const PORT = Number(process.env.PORT ?? 8080);
 
 const MIME = {
@@ -53,6 +56,23 @@ async function serveStatic(req, res) {
     }
   }
 }
+
+// ----------------------------------------------------------- show engine ----
+
+const accounts = await createAccountStore(DATA_DIR);
+const show = createShowEngine({ now: Date.now, accounts });
+/** peerId -> ws */
+const sockets = new Map();
+
+function flush() {
+  for (const { to, msg } of show.drain()) {
+    const payload = { type: 'show', msg };
+    if (to === '*') for (const ws of sockets.values()) send(ws, payload);
+    else if (sockets.has(to)) send(sockets.get(to), payload);
+  }
+}
+
+setInterval(() => { show.tick(); flush(); }, 250).unref?.();
 
 const server = createServer((req, res) => {
   void serveStatic(req, res);
@@ -103,6 +123,9 @@ wss.on('connection', (ws) => {
   ws.peerId = `p${nextPeerId++}`;
   ws.room = null;
 
+  sockets.set(ws.peerId, ws);
+  show.connect(ws.peerId);
+
   send(ws, { type: 'welcome', id: ws.peerId, features: ['show'] });
 
   ws.on('message', (raw) => {
@@ -124,12 +147,20 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'show':
+        void show.handle(ws.peerId, msg.msg).then(flush);
+        break;
+
       default:
         break;
     }
   });
 
   ws.on('close', () => {
+    sockets.delete(ws.peerId);
+    show.disconnect(ws.peerId);
+    flush();
+
     if (!ws.room) return;
     const room = ws.room;
     rooms.get(room)?.delete(ws);
