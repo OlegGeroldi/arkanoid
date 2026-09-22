@@ -38,7 +38,14 @@ export function playerShowScene(app: App): Scene {
     app.overlay.classList.add('interactive');
     const root = app.overlay;
     if (!st || !me) renderLogin(root, store, loginUi, () => { lastKey = ''; render(); });
-    else if (st.phase === 'lobby') renderLobby(root, store);
+    else if (st.phase === 'lobby') {
+      renderLobby(root, store, () => {
+        loginUi.picked = null;
+        loginUi.creating = false;
+        store.authError = '';
+        store.logout();
+      });
+    }
     else renderWait(root, store);
   }
 

@@ -11,6 +11,7 @@ export function renderLogin(root: HTMLElement, store: ShowStore, ui: { picked: s
     let avatar = AVATARS[0];
     const name = el('input', { class: 'field', placeholder: 'Name', maxlength: 16 });
     const pin = el('input', { class: 'field', placeholder: 'PIN (4 digits)', inputmode: 'numeric', maxlength: 4, type: 'password' });
+    pin.addEventListener('input', () => { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); });
     const grid = el('div', { class: 'avatar-grid' });
     const paint = (): void => {
       grid.replaceChildren(...AVATARS.map((a) => button(a, () => { avatar = a; paint(); }, a === avatar ? 'avatar picked' : 'avatar')));
@@ -29,6 +30,7 @@ export function renderLogin(root: HTMLElement, store: ShowStore, ui: { picked: s
   if (ui.picked) {
     const acc = store.accounts.find((a) => a.id === ui.picked);
     const pin = el('input', { class: 'field pin', placeholder: '••••', inputmode: 'numeric', maxlength: 4, type: 'password' });
+    pin.addEventListener('input', () => { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); });
     const go = (): void => store.send({ k: 'login', id: ui.picked!, pin: pin.value });
     pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     root.replaceChildren(el('div', { class: 'show-panel' },
