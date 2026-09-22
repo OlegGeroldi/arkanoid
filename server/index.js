@@ -72,7 +72,15 @@ function flush() {
   }
 }
 
-setInterval(() => { show.tick(); flush(); }, 250).unref?.();
+setInterval(() => {
+  try {
+    show.tick();
+    flush();
+  } catch (err) {
+    console.error('show.tick failed:', err);
+    flush();
+  }
+}, 250).unref?.();
 
 const server = createServer((req, res) => {
   void serveStatic(req, res);
@@ -148,7 +156,10 @@ wss.on('connection', (ws) => {
       }
 
       case 'show':
-        void show.handle(ws.peerId, msg.msg).then(flush);
+        void show.handle(ws.peerId, msg.msg).then(flush, (err) => {
+          console.error('show.handle failed:', err);
+          flush();
+        });
         break;
 
       default:
