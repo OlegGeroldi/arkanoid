@@ -98,3 +98,45 @@ test('no more than 10 players', async () => {
   const refused = e2.drain().filter((o) => o.to === 'p10' && o.msg.k === 'auth' && !o.msg.ok);
   assert.equal(refused.length, 1);
 });
+
+test('un-readying the only ready player cancels the countdown', async () => {
+  const { eng, advance } = setup();
+  await login(eng, 'p1', 'u1');
+  await login(eng, 'p2', 'u2');
+  await eng.handle('p1', { k: 'ready', ready: true });
+  assert.ok(eng.state().countdownEnd);
+  assert.equal(eng.state().phase, 'lobby');
+  await eng.handle('p1', { k: 'ready', ready: false });
+  assert.equal(eng.state().countdownEnd, null);
+  advance(DUR.countdown + 0.1);
+  assert.equal(eng.state().phase, 'lobby');
+});
+
+test('the only ready player disconnecting cancels the countdown', async () => {
+  const { eng, advance } = setup();
+  await login(eng, 'p1', 'u1');
+  await login(eng, 'p2', 'u2');
+  await eng.handle('p1', { k: 'ready', ready: true });
+  assert.ok(eng.state().countdownEnd);
+  eng.disconnect('p1');
+  assert.equal(eng.state().countdownEnd, null);
+  advance(DUR.countdown + 0.1);
+  assert.equal(eng.state().phase, 'lobby');
+});
+
+test('the solo bot gets a color no in-match player is using', async () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({ id: `x${i}`, name: `N${i}`, avatar: '🦊', stats: {} }));
+  let t = 1_000_000;
+  const accounts = { ...fakeAccounts(), list: () => many, verify: (id) => many.find((a) => a.id === id) };
+  const eng = createShowEngine({ now: () => t, accounts, seed: () => 7 });
+  const advance = (s) => { t += s * 1000; eng.tick(); };
+  for (let i = 0; i < 10; i++) await login(eng, `p${i}`, `x${i}`);
+  await eng.handle('p0', { k: 'ready', ready: true });
+  advance(DUR.countdown + 0.1);
+  const st = eng.state();
+  assert.equal(st.phase, 'intro');
+  const bot = st.players.find((p) => p.isBot);
+  const human = st.players.find((p) => p.id === 'x0');
+  assert.ok(bot && bot.inMatch);
+  assert.notEqual(bot.color, human.color);
+});

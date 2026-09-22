@@ -61,14 +61,14 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
 
   const pushState = () => out('*', { k: 'state', show: state() });
 
-  function freeColor() {
-    const used = new Set([...players.values()].map((p) => p.color));
+  function freeColor(pool = [...players.values()]) {
+    const used = new Set(pool.map((p) => p.color));
     return COLORS.find((c) => !used.has(c)) ?? COLORS[0];
   }
 
-  function addPlayer(acc, isBot = false) {
+  function addPlayer(acc, isBot = false, colorPool = undefined) {
     const p = {
-      id: acc.id, name: acc.name, avatar: acc.avatar, color: freeColor(), isBot,
+      id: acc.id, name: acc.name, avatar: acc.avatar, color: freeColor(colorPool), isBot,
       ready: isBot, inMatch: false, score: 0, coins: 0, result: null, lastPoints: 0,
     };
     players.set(p.id, p);
@@ -95,13 +95,19 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
   }
 
   function startMatch() {
+    const connected = [...players.values()].filter((p) => !p.isBot && playerPeer(p.id));
+    if (!connected.some((p) => p.ready)) {
+      // Everyone who was ready un-readied or disconnected before the countdown fired.
+      countdownEnd = null;
+      return;
+    }
     countdownEnd = null;
     for (const p of players.values()) {
       p.inMatch = p.ready && (p.isBot || playerPeer(p.id) !== null);
       p.score = 0; p.coins = 0; p.result = null; p.lastPoints = 0;
     }
     if (inMatch().length === 1 && !players.has(BOT.id)) {
-      const b = addPlayer(BOT, true);
+      const b = addPlayer(BOT, true, inMatch());
       b.inMatch = true;
     }
     schedule = buildSchedule(seed());
@@ -114,9 +120,9 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
 
   function maybeStart() {
     const connected = [...players.values()].filter((p) => !p.isBot && playerPeer(p.id));
-    if (!connected.length) return;
+    if (!connected.some((p) => p.ready)) { countdownEnd = null; return; }
     if (connected.every((p) => p.ready)) startMatch();
-    else if (connected.some((p) => p.ready) && countdownEnd === null) countdownEnd = now() + DUR.countdown * 1000;
+    else if (countdownEnd === null) countdownEnd = now() + DUR.countdown * 1000;
   }
 
   async function handle(peerId, msg) {
@@ -181,6 +187,7 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
       const accId = peers.get(peerId)?.accountId;
       peers.delete(peerId);
       if (accId) event('left', { playerId: accId });
+      if (phase === 'lobby') maybeStart();
       pushState();
     },
     handle,
