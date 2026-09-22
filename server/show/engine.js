@@ -172,14 +172,95 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
     }
   }
 
-  function handleMatch() {}
+  function beginArena() {
+    roundIdx += 1;
+    const r = schedule[roundIdx];
+    clearOrder = [];
+    for (const p of inMatch()) { p.result = null; p.lastPoints = 0; }
+    phase = 'arena';
+    deadline = now() + ((r.boss ? DUR.bossArena : DUR.arena) + DUR.grace) * 1000;
+    event('roundStart');
+    pushState();
+  }
+
+  function applyResult(p, result) {
+    if (p.result) return;
+    const clean = {
+      cleared: Boolean(result?.cleared),
+      died: Boolean(result?.died),
+      timeLeft: Math.max(0, Number(result?.timeLeft) || 0),
+      bricks: Math.max(0, Math.floor(Number(result?.bricks) || 0)),
+      livesLost: Math.max(0, Math.floor(Number(result?.livesLost) || 0)),
+    };
+    p.result = clean;
+    let place = null;
+    if (clean.cleared) { place = clearOrder.length; clearOrder.push(p.id); }
+    const { points, coins } = scoreArena(clean, place);
+    p.score += points; p.coins += coins; p.lastPoints = points;
+    event(clean.cleared ? 'cleared' : clean.died ? 'died' : 'timeout', { playerId: p.id, place: place ?? undefined, points });
+    if (inMatch().every((q) => q.result)) endRound();
+    else pushState();
+  }
+
+  function endRound() {
+    phase = 'roundEnd';
+    deadline = now() + DUR.roundEnd * 1000;
+    event('roundEnd');
+    pushState();
+  }
+
+  async function endMatch() {
+    phase = 'over';
+    deadline = null;
+    const ranked = inMatch().sort((a, b) => b.score - a.score);
+    event('matchOver', { playerId: ranked[0]?.id });
+    pushState();
+    for (const p of ranked) {
+      if (!p.isBot) await accounts.recordMatch(p.id, { won: p === ranked[0], score: p.score });
+    }
+  }
+
+  function advancePhase() {
+    if (phase === 'intro') beginArena();
+    else if (phase === 'arena') {
+      for (const p of inMatch()) if (!p.result) applyResult(p, { cleared: false, bricks: 0 });
+    } else if (phase === 'roundEnd') {
+      if (roundIdx + 1 < schedule.length) beginArena();
+      else void endMatch();
+    }
+  }
+
+  function handleMatch(peerId, peer, msg) {
+    const fromBotHost = msg.for === BOT.id && peerId === botHost();
+    const who = fromBotHost ? players.get(BOT.id) : peer.accountId ? players.get(peer.accountId) : null;
+    switch (msg.k) {
+      case 'result':
+        if (phase === 'arena' && who?.inMatch && (msg.for === undefined || fromBotHost)) applyResult(who, msg.result);
+        break;
+      case 'snapshot':
+        if (phase === 'arena' && who?.inMatch && (msg.for === undefined || fromBotHost)) {
+          out('*', { k: 'snapshot', playerId: who.id, snap: msg.snap });
+        }
+        break;
+      case 'restart':
+        if (phase !== 'over') break;
+        phase = 'lobby'; deadline = null; roundIdx = -1; schedule = [];
+        players.delete(BOT.id);
+        for (const p of players.values()) { p.ready = false; p.inMatch = false; p.result = null; }
+        pushState();
+        break;
+    }
+  }
 
   function tick() {
     if (phase === 'lobby' && countdownEnd !== null && now() >= countdownEnd) startMatch();
     tickMatch(); // Task 6
   }
 
-  function tickMatch() {}
+  function tickMatch() {
+    let guard = 0;
+    while (deadline !== null && now() >= deadline && guard++ < 50) advancePhase();
+  }
 
   return {
     connect(peerId) { peers.set(peerId, { role: 'player', accountId: null }); },

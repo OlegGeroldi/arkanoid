@@ -140,3 +140,92 @@ test('the solo bot gets a color no in-match player is using', async () => {
   assert.ok(bot && bot.inMatch);
   assert.notEqual(bot.color, human.color);
 });
+
+const res = (o) => ({ cleared: false, died: false, timeLeft: 0, bricks: 0, livesLost: 0, ...o });
+
+async function startedDuo() {
+  const s = setup();
+  await login(s.eng, 'p1', 'u1');
+  await login(s.eng, 'p2', 'u2');
+  await s.eng.handle('p1', { k: 'ready', ready: true });
+  await s.eng.handle('p2', { k: 'ready', ready: true });
+  s.advance(DUR.intro + 0.1);
+  return s;
+}
+
+test('intro leads into the first arena', async () => {
+  const { eng } = await startedDuo();
+  const st = eng.state();
+  assert.equal(st.phase, 'arena');
+  assert.equal(st.round.index, 0);
+  assert.equal(st.round.seconds, DUR.arena);
+});
+
+test('round ends when everyone reported; first clear scores the bonus', async () => {
+  const { eng } = await startedDuo();
+  await eng.handle('p2', { k: 'result', result: res({ cleared: true, timeLeft: 20, bricks: 30 }) });
+  await eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 10, bricks: 30 }) });
+  const st = eng.state();
+  assert.equal(st.phase, 'roundEnd');
+  const byId = Object.fromEntries(st.players.map((p) => [p.id, p]));
+  assert.equal(byId.u2.score, 170);
+  assert.equal(byId.u1.score, 110);
+  assert.equal(byId.u1.coins, 30);
+  const kinds = eng.drain().filter((o) => o.msg.k === 'event').map((o) => o.msg.ev.kind);
+  assert.ok(kinds.includes('cleared') && kinds.includes('roundEnd'));
+});
+
+test('a result is accepted once per player per round', async () => {
+  const { eng } = await startedDuo();
+  await eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 10 }) });
+  await eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 70 }) });
+  assert.equal(eng.state().players.find((p) => p.id === 'u1').score, 160);
+});
+
+test('silent players time out after the arena clock plus grace', async () => {
+  const { eng, advance } = await startedDuo();
+  await eng.handle('p1', { k: 'result', result: res({ bricks: 5 }) });
+  advance(DUR.arena + DUR.grace + 0.1);
+  assert.equal(eng.state().phase, 'roundEnd');
+  assert.equal(eng.state().players.find((p) => p.id === 'u2').result.cleared, false);
+});
+
+test('ten rounds then over; stats recorded for humans only', async () => {
+  const s = setup();
+  await login(s.eng, 'p1', 'u1');
+  s.eng.connect('tv');
+  await s.eng.handle('tv', { k: 'hello', role: 'tv' });
+  await s.eng.handle('p1', { k: 'ready', ready: true });
+  s.advance(DUR.intro + 0.1);
+  for (let i = 0; i < 10; i++) {
+    assert.equal(s.eng.state().round.index, i);
+    await s.eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 5 }) });
+    await s.eng.handle('tv', { k: 'result', for: 'bot', result: res({ bricks: 3 }) });
+    s.advance(DUR.roundEnd + 0.1);
+  }
+  assert.equal(s.eng.state().phase, 'over');
+  assert.deepEqual(s.accounts.recorded, [{ id: 'u1', won: true, score: 10 * 155 }]);
+});
+
+test('only the bot host may report for the bot', async () => {
+  const s = setup();
+  await login(s.eng, 'p1', 'u1');
+  s.eng.connect('tv');
+  await s.eng.handle('tv', { k: 'hello', role: 'tv' });
+  await s.eng.handle('p1', { k: 'ready', ready: true });
+  s.advance(DUR.intro + 0.1);
+  await s.eng.handle('p1', { k: 'result', for: 'bot', result: res({ cleared: true, timeLeft: 70 }) });
+  assert.equal(s.eng.state().players.find((p) => p.isBot).result, null);
+});
+
+test('restart from over returns everyone to the lobby, unready', async () => {
+  const s = await startedDuo();
+  // Force the end: every arena times out. Each big step crosses at most one
+  // arena and the following phase change, so allow plenty of steps.
+  for (let i = 0; i < 40 && s.eng.state().phase !== 'over'; i++) s.advance(DUR.bossArena + DUR.grace + 1);
+  assert.equal(s.eng.state().phase, 'over');
+  await s.eng.handle('p1', { k: 'restart' });
+  const st = s.eng.state();
+  assert.equal(st.phase, 'lobby');
+  assert.ok(st.players.every((p) => !p.ready || p.isBot));
+});
