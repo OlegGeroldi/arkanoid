@@ -1,32 +1,12 @@
-import type { CardEffect } from './race';
+import type { CardEffect } from './effects';
 import { DEBUFFS } from './debuffs';
 
-/** The team-round shop: credits earned from the trivia board buy a boost for your
- *  own pilot (or an ally's — see `target: 'self'` in `teamQuizDevice.ts`'s
- *  `buy()`), or a diversion aimed at a non-ally's. Deliberately not an
- *  autobroadcast-on-correct-answer system (the party host tried that and it
- *  didn't work: most quiz content here has no objectively correct answer) —
- *  credits are a resource the team spends on purpose, mid-round, while
- *  watching their pilot's field live.
- *
- *  Every item just wraps the same `CardEffect` the solo race already knows how
- *  to apply (`core/race.ts`), so the pilot scene needs no new effect-handling
- *  code at all — only a new source for the effect.
- *
- *  Credits *are* final score now (`TeamQuizStore.championId`/`matchAwardLines`
- *  rank by `core/teamRace.ts`'s `finalScore` — round bonuses plus whatever
- *  credits are left unspent) — spending is a real sacrifice against the
- *  match's own ending, not free money on top of it, so self-buffs don't need
- *  a steep price to feel costly: flat 20 each (2026-09-06). Rival-target
- *  debuffs stay tiered: cheap tactical ones ~100-130, stronger ones ~190-220.
- *  No `timeBoost` any more — a fixed per-level clock replaced the old
- *  open-ended round timer it used to extend. */
+/** The show's shop: coins buy a buff for yourself or an ally, or a debuff for a non-ally. Bought items land at the start of the next arena. */
 
 export type ShopItemId =
   | 'extraLife'
   | 'shield'
   | 'superCharge'
-  | 'diceBoost'
   | 'sabotage'
   | 'mirror'
   | 'brittle'
@@ -36,8 +16,7 @@ export type ShopItemId =
   | 'haste'
   | 'jam'
   | 'drain'
-  | 'quake'
-  | 'teleportBack';
+  | 'quake';
 
 export interface ShopItem {
   id: ShopItemId;
@@ -82,16 +61,6 @@ export const SHOP_ITEMS: Record<ShopItemId, ShopItem> = {
     target: 'self',
     desc: 'Super charges up and fires immediately',
     effect: { t: 'super' },
-  },
-  diceBoost: {
-    id: 'diceBoost',
-    name: 'Tailwind',
-    icon: '⇢',
-    color: '#3ddc84',
-    cost: 20,
-    target: 'self',
-    desc: '+1 to the next track dice roll',
-    effect: { t: 'dice', delta: 1 },
   },
   sabotage: {
     id: 'sabotage',
@@ -197,22 +166,6 @@ export const SHOP_ITEMS: Record<ShopItemId, ShopItem> = {
     target: 'rival',
     desc: DEBUFFS.quake.desc,
     effect: { t: 'debuff', id: 'quake' },
-  },
-  /** Not a `DEBUFFS`/`Arena.applyDebuff` effect like the others — a `cell`
-   *  effect moves the target's track position directly, same vocabulary
-   *  `core/race.ts`'s own `setback` boost card already uses (there, -3, free
-   *  once drawn); a purchased, expensive-tier version goes further to
-   *  justify the price. `teamQuizStore.ts`'s `applyPurchase` applies it to
-   *  the target's `cell`, same special-case `applyBoost` already has. */
-  teleportBack: {
-    id: 'teleportBack',
-    name: 'Teleport back',
-    icon: '⏪',
-    color: '#ff2d55',
-    cost: 220,
-    target: 'rival',
-    desc: 'Yanks the rival 5 cells back on the shared track',
-    effect: { t: 'cell', delta: -5 },
   },
 };
 

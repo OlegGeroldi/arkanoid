@@ -5,12 +5,9 @@ import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { createTeamQuiz } from './teamQuiz.js';
-import { createJeopardyStore, JeopardyValidationError } from './jeopardyStore.js';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DIST = join(ROOT, 'dist');
-const DATA_DIR = join(ROOT, 'server', 'data');
 const PORT = Number(process.env.PORT ?? 8080);
 
 const MIME = {
@@ -58,10 +55,6 @@ async function serveStatic(req, res) {
 }
 
 const server = createServer((req, res) => {
-  if (req.url === '/api/jeopardy') {
-    void handleJeopardyApi(req, res);
-    return;
-  }
   void serveStatic(req, res);
 });
 
@@ -102,52 +95,6 @@ function broadcast(room, msg, except) {
   }
 }
 
-const teamQuiz = createTeamQuiz({ broadcast, send, getPeers: (room) => rooms.get(room) ?? [] });
-setInterval(() => teamQuiz.tick(), 1000).unref?.();
-
-// -------------------------------------------------------------- jeopardy ---
-
-const jeopardyStore = createJeopardyStore(DATA_DIR);
-
-async function readBody(req, limit = 2 * 1024 * 1024) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > limit) throw new Error('Тело запроса слишком большое.');
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-async function handleJeopardyApi(req, res) {
-  if (req.method === 'GET') {
-    try {
-      const data = await jeopardyStore.load();
-      res.writeHead(200, { 'content-type': MIME['.json'] });
-      res.end(JSON.stringify(data));
-    } catch (err) {
-      res.writeHead(500, { 'content-type': MIME['.json'] });
-      res.end(JSON.stringify({ error: 'Не удалось прочитать данные квиза.' }));
-    }
-    return;
-  }
-  if (req.method === 'PUT') {
-    try {
-      const body = JSON.parse(await readBody(req));
-      await jeopardyStore.save(body);
-      res.writeHead(200, { 'content-type': MIME['.json'] });
-      res.end(JSON.stringify({ ok: true }));
-    } catch (err) {
-      const status = err instanceof JeopardyValidationError ? 400 : 500;
-      res.writeHead(status, { 'content-type': MIME['.json'] });
-      res.end(JSON.stringify({ error: err.message || 'Internal server error.' }));
-    }
-    return;
-  }
-  res.writeHead(405).end('method not allowed');
-}
-
 // ---------------------------------------------------------------- rooms ----
 
 let nextPeerId = 1;
@@ -156,7 +103,7 @@ wss.on('connection', (ws) => {
   ws.peerId = `p${nextPeerId++}`;
   ws.room = null;
 
-  send(ws, { type: 'welcome', id: ws.peerId, features: ['teamquiz'] });
+  send(ws, { type: 'welcome', id: ws.peerId, features: ['show'] });
 
   ws.on('message', (raw) => {
     let msg;
@@ -177,11 +124,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case 'teamquiz': {
-        teamQuiz.handle(ws, msg);
-        break;
-      }
-
       default:
         break;
     }
@@ -193,7 +135,6 @@ wss.on('connection', (ws) => {
     rooms.get(room)?.delete(ws);
     if (rooms.get(room)?.size === 0) {
       rooms.delete(room);
-      teamQuiz.cleanup(room);
     }
   });
 });
@@ -213,7 +154,7 @@ function localAddresses() {
 server.listen(PORT, () => {
   const addresses = localAddresses();
   console.log('');
-  console.log('  КОМАНДНЫЙ КВИЗ — сервер локальной сети');
+  console.log('  ARCOQUIZ — сервер локальной сети');
   console.log('  ---------------------------------------');
   if (!existsSync(join(DIST, 'index.html'))) {
     console.log('  ВНИМАНИЕ: папки dist нет. Соберите игру: npm run build');

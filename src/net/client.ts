@@ -89,8 +89,8 @@ export class NetClient {
           this.selfId = String(msg.id ?? '');
           this.features = Array.isArray(msg.features) ? (msg.features as string[]) : [];
           break;
-        case 'teamquiz':
-          for (const fn of this.teamQuizListeners) fn(msg.msg);
+        case 'show':
+          for (const fn of this.showListeners) fn(msg.msg);
           break;
         default:
           break;
@@ -121,19 +121,18 @@ export class NetClient {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
-  /** The team quiz talks to its referee on its own channel rather than
-   *  through a generic relay: the server has to read these, not just forward
-   *  them. */
-  sendTeamQuiz(msg: unknown): void {
-    this.send({ type: 'teamquiz', msg });
+  /** The show talks to its referee on its own channel rather than through a
+   *  generic relay: the server has to read these, not just forward them. */
+  sendShow(msg: unknown): void {
+    this.send({ type: 'show', msg });
   }
 
-  onTeamQuiz(fn: (msg: unknown) => void): () => void {
-    this.teamQuizListeners.add(fn);
-    return () => this.teamQuizListeners.delete(fn);
+  onShow(fn: (msg: unknown) => void): () => void {
+    this.showListeners.add(fn);
+    return () => this.showListeners.delete(fn);
   }
 
-  private teamQuizListeners = new Set<(msg: unknown) => void>();
+  private showListeners = new Set<(msg: unknown) => void>();
 
   disconnect(): void {
     this.name = '';

@@ -1,11 +1,10 @@
 import { ARENA_H, ARENA_W, BRICK_H, GRID_LEFT, GRID_TOP, PADDLE_H, PADDLE_Y, ROWS, WALL, brickWidthFor } from '../core/constants';
 import { BRICK_KINDS, isBrickCode } from '../core/bricks';
-import { RACE_SNAPSHOT_INTERVAL, type RaceSnapshot } from '../net/raceProtocol';
+import { SNAPSHOT_INTERVAL, type ArenaSnapshot } from '../net/protocol';
 import { FONT } from './renderer';
 
-/** Interpolated playback of a live field's snapshots — extracted from
- *  `src/game/race.ts`'s spectator mirror so the team quiz's team screen can
- *  show its own pilot's field the same way the race's watchers already do.
+/** Interpolated playback of a live field's snapshots, for a TV mirroring an
+ *  arena from periodic `ArenaSnapshot`s.
  *
  *  Two snapshots are kept, not one: drawing the newest one as it arrives
  *  means the ball teleports twenty times a second, which reads as lag even
@@ -13,17 +12,17 @@ import { FONT } from './renderer';
  *  interpolating between the pair makes the motion continuous, and costs
  *  only the interval itself in delay. */
 export class SnapshotMirror {
-  prev: RaceSnapshot | null = null;
-  current: RaceSnapshot | null = null;
+  prev: ArenaSnapshot | null = null;
+  current: ArenaSnapshot | null = null;
   /** Seconds since `current` arrived. */
   age = 0;
   /** The gap `current` arrived after — how long to spread the interpolation
    *  over. Widens on its own if the sender starts sending less often. */
-  gap = RACE_SNAPSHOT_INTERVAL;
+  gap = SNAPSHOT_INTERVAL;
 
   /** Feeds a new snapshot in. Out-of-order packets are dropped rather than
    *  rewound — a frame of the past is worse than a frame of nothing. */
-  push(snap: RaceSnapshot): void {
+  push(snap: ArenaSnapshot): void {
     if (this.current && snap.n <= this.current.n) return;
     if (!snap.cells && this.current?.cells) snap.cells = this.current.cells;
     if (this.current) this.gap = Math.min(0.5, Math.max(0.02, this.age));
@@ -40,7 +39,7 @@ export class SnapshotMirror {
     this.prev = null;
     this.current = null;
     this.age = 0;
-    this.gap = RACE_SNAPSHOT_INTERVAL;
+    this.gap = SNAPSHOT_INTERVAL;
   }
 }
 

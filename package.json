@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "node --test server/**/*.test.js",
     "serve": "node server/index.js",
     "lan": "npm run build && node server/index.js"
   },

@@ -1,15 +1,10 @@
 import type { Arena } from './arena';
-import type { CardEffect } from './race';
+import type { CardEffect } from './effects';
 import { ENERGY_MAX } from './constants';
 
-/** Applies a `CardEffect` to a live arena — the same vocabulary the solo
- *  race's card throws already use (`CARDS` in `core/race.ts`), pulled out so
- *  the team quiz's shop can hand a purchased item straight to a pilot's
- *  arena without duplicating the switch.
- *
- *  Deliberately silent on `clock`, `dice` and `cell`: those adjust a turn's
- *  countdown, a next roll, or a team's track position — never the arena
- *  itself — so the caller (whichever owns that number) has to apply them. */
+/** Applies a `CardEffect` to a live arena — the shared vocabulary the shop's
+ *  purchased items use, pulled out so a caller can hand one straight to a
+ *  pilot's arena without duplicating the switch. */
 export function applyCardEffectToArena(effect: CardEffect, arena: Arena): void {
   switch (effect.t) {
     case 'powerup':
@@ -31,10 +26,6 @@ export function applyCardEffectToArena(effect: CardEffect, arena: Arena): void {
       break;
     case 'breakShield':
       arena.breakShieldNodes();
-      break;
-    case 'clock':
-    case 'dice':
-    case 'cell':
       break;
   }
 }
