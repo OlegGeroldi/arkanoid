@@ -17,12 +17,12 @@
 ## Global Constraints
 
 - Max 10 players in a match; 10 distinct colors.
-- Solo: if exactly one human is in the match at start, a bot named «Бот» (avatar 🤖) is added.
+- Solo: if exactly one human is in the match at start, a bot named «Bot» (avatar 🤖) is added.
 - Match = Act 1 (3 rounds), Act 2 (3 rounds, the arena of its last round is BOSS #1), Act 3 (3 rounds), Finale (1 round, BOSS #2) = 10 arenas.
 - Regular arenas: a random level from `RACE_LEVELS` (100 levels, indices 0–99) that is not a boss level (`(i+1) % 10 !== 0`), with no repeats within a match.
 - Bosses: two distinct boss ids picked at random from `sentinel | weaver | core | doh`. For each, a random `RACE_LEVELS` index guarded by that boss (from `bossForLevel`: sentinel → 9, 19, 29; weaver → 39, 49, 59, 69; core → 79, 89; doh → 99).
 - Accounts are stored in `server/data/players.json` (the dir is gitignored). The PIN must match `/^\d{4}$/` and is stored only as a scrypt hash + salt. Names are 1–16 chars, unique case-insensitively.
-- All UI copy is in Russian.
+- All user-facing text is in English: UI, TV, ticker, manual, server error messages, console banner, README, question content. No Russian strings in `src/` or `server/` (gate: `grep -rn "[А-Яа-яЁё]" src server --include=*.ts --include=*.js --include=*.css` prints nothing once Task 12 is done). New code in Tasks 1–11 is written in English from the start.
 - `tsconfig`: `strict`, `noUnusedLocals`, `noUnusedParameters`, `verbatimModuleSyntax` (type-only imports use `import type`).
 - Gates after every task: `npm run typecheck` and `npm test` (added in Task 1).
 - One show per server (LAN). Players join at the printed URL; there is no room code in stages 1–2 (QR comes in stage 5).
@@ -57,7 +57,7 @@ The branch `feat/race-mode` has uncommitted work (README, index.html, package.js
 - `src/game/show/botRunner.ts`: headless bot arenas on the bot-host client.
 - `src/game/player/login.ts`, `src/game/player/lobby.ts`, `src/game/player/arena.ts`, `src/game/player/wait.ts`, `src/game/player/index.ts`: the player scenes plus a router scene that picks the sub-view from store state.
 - `src/game/tv/index.ts`, `src/game/tv/lobby.ts`, `src/game/tv/arenaGrid.ts`, `src/game/tv/ticker.ts`, `src/game/tv/standings.ts`: the TV.
-- `src/ui/start.ts`: the landing screen («Я играю» / «Это экран-ТВ»).
+- `src/ui/start.ts`: the landing screen («I'm playing» / «This is the TV»).
 - `src/ui/manual.ts`: a 5-point manual element.
 - `src/ui/show.css`: styles for the new screens, imported from `main.ts`.
 
@@ -156,7 +156,7 @@ import { el } from './dom';
 /** Landing screen. Real choices arrive in Task 11. */
 export const startScene: SceneFactory = (app): Scene => {
   app.overlay.classList.add('interactive');
-  app.overlay.replaceChildren(el('div', { class: 'start' }, el('h1', {}, 'ARCOQUIZ'), el('p', {}, 'Шоу собирается…')));
+  app.overlay.replaceChildren(el('div', { class: 'start' }, el('h1', {}, 'ARCOQUIZ'), el('p', {}, 'The show is getting ready…')));
   return {
     update() {},
     draw(ctx, w, h) {
@@ -198,7 +198,7 @@ In `server/index.js`:
 - delete the `teamQuiz`/`jeopardy` imports, `createTeamQuiz`, its `setInterval`, `jeopardyStore`, `readBody`, `handleJeopardyApi`, and the `/api/jeopardy` branch;
 - in the `connection` handler, drop the `case 'teamquiz'` and the `teamQuiz.cleanup` call;
 - change `features: ['teamquiz']` to `features: ['show']`;
-- change the banner line to `'  ARCOQUIZ — сервер локальной сети'`.
+- change the banner line to `'  ARCOQUIZ — LAN server'`.
 
 In `src/net/client.ts`:
 - rename `teamQuizListeners`/`sendTeamQuiz`/`onTeamQuiz` to `showListeners`/`sendShow`/`onShow`;
@@ -352,7 +352,7 @@ export const COLORS = [
   '#ff8c42', '#7cf5c4', '#ff4d6d', '#8fa8ff', '#e8f2ff',
 ];
 export const AVATARS = ['🦊', '🐸', '🐙', '🦉', '🐼', '🦄', '🐯', '🐨', '🦖', '🐝', '🐧', '🦁', '🐻', '🐳', '🦩', '🌵'];
-export const BOT = { id: 'bot', name: 'Бот', avatar: '🤖' };
+export const BOT = { id: 'bot', name: 'Bot', avatar: '🤖' };
 
 /** Seconds. */
 export const DUR = {
@@ -508,8 +508,8 @@ const fresh = async () => createAccountStore(await mkdtemp(join(tmpdir(), 'acc-'
 
 test('register then verify with the right PIN only', async () => {
   const s = await fresh();
-  const a = await s.register({ name: 'Катя', avatar: '🦊', pin: '1234' });
-  assert.equal(a.name, 'Катя');
+  const a = await s.register({ name: 'Kate', avatar: '🦊', pin: '1234' });
+  assert.equal(a.name, 'Kate');
   assert.deepEqual(a.stats, { matches: 0, wins: 0, best: 0 });
   assert.equal(s.verify(a.id, '1234')?.id, a.id);
   assert.equal(s.verify(a.id, '9999'), null);
@@ -518,18 +518,18 @@ test('register then verify with the right PIN only', async () => {
 
 test('rejects bad names, bad pins, duplicate names', async () => {
   const s = await fresh();
-  await s.register({ name: 'Олег', avatar: '🐸', pin: '0000' });
-  await assert.rejects(s.register({ name: 'олег', avatar: '🐸', pin: '1111' }), AccountError);
+  await s.register({ name: 'Oleg', avatar: '🐸', pin: '0000' });
+  await assert.rejects(s.register({ name: 'oleg', avatar: '🐸', pin: '1111' }), AccountError);
   await assert.rejects(s.register({ name: '', avatar: '🐸', pin: '1111' }), AccountError);
   await assert.rejects(s.register({ name: 'x'.repeat(17), avatar: '🐸', pin: '1111' }), AccountError);
-  await assert.rejects(s.register({ name: 'Аня', avatar: '🐸', pin: '12a4' }), AccountError);
-  await assert.rejects(s.register({ name: 'Бот', avatar: '🐸', pin: '1234' }), AccountError);
+  await assert.rejects(s.register({ name: 'Anya', avatar: '🐸', pin: '12a4' }), AccountError);
+  await assert.rejects(s.register({ name: 'Bot', avatar: '🐸', pin: '1234' }), AccountError);
 });
 
 test('persists across reloads and never stores the PIN', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'acc-'));
   const s1 = await createAccountStore(dir);
-  const a = await s1.register({ name: 'Аня', avatar: '🦉', pin: '4321' });
+  const a = await s1.register({ name: 'Anya', avatar: '🦉', pin: '4321' });
   await s1.recordMatch(a.id, { won: true, score: 900 });
   const raw = await readFile(join(dir, 'players.json'), 'utf8');
   assert.ok(!raw.includes('4321'));
@@ -575,10 +575,10 @@ export async function createAccountStore(dir) {
 
     async register({ name, avatar, pin }) {
       const clean = String(name ?? '').trim();
-      if (clean.length < 1 || clean.length > 16) throw new AccountError('Имя — от 1 до 16 символов.');
-      if (clean.toLowerCase() === BOT.name.toLowerCase()) throw new AccountError('Это имя занято ботом.');
-      if (accounts.some((a) => a.name.toLowerCase() === clean.toLowerCase())) throw new AccountError('Такое имя уже есть.');
-      if (!/^\d{4}$/.test(String(pin ?? ''))) throw new AccountError('PIN — ровно 4 цифры.');
+      if (clean.length < 1 || clean.length > 16) throw new AccountError('Name must be 1–16 characters.');
+      if (clean.toLowerCase() === BOT.name.toLowerCase()) throw new AccountError('That name belongs to the bot.');
+      if (accounts.some((a) => a.name.toLowerCase() === clean.toLowerCase())) throw new AccountError('That name is taken.');
+      if (!/^\d{4}$/.test(String(pin ?? ''))) throw new AccountError('PIN must be exactly 4 digits.');
       const salt = randomBytes(16).toString('hex');
       const acc = {
         id: `u${randomBytes(6).toString('hex')}`,
@@ -663,8 +663,8 @@ import { DUR } from './constants.js';
 
 function fakeAccounts() {
   const list = [
-    { id: 'u1', name: 'Аня', avatar: '🦊', stats: { matches: 0, wins: 0, best: 0 } },
-    { id: 'u2', name: 'Олег', avatar: '🐸', stats: { matches: 0, wins: 0, best: 0 } },
+    { id: 'u1', name: 'Anya', avatar: '🦊', stats: { matches: 0, wins: 0, best: 0 } },
+    { id: 'u2', name: 'Oleg', avatar: '🐸', stats: { matches: 0, wins: 0, best: 0 } },
   ];
   const recorded = [];
   return {
@@ -847,7 +847,7 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
     if (!players.has(acc.id)) {
       if (players.size >= MAX_PLAYERS) {
         peers.get(peerId).accountId = null;
-        out(peerId, { k: 'auth', ok: false, error: 'Все 10 мест заняты.' });
+        out(peerId, { k: 'auth', ok: false, error: 'All 10 seats are taken.' });
         return;
       }
       addPlayer(acc);
@@ -906,14 +906,14 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
         break;
       case 'login': {
         const acc = accounts.verify(msg.id, msg.pin);
-        if (!acc) out(peerId, { k: 'auth', ok: false, error: 'Неверный PIN.' });
+        if (!acc) out(peerId, { k: 'auth', ok: false, error: 'Wrong PIN.' });
         else bind(peerId, acc);
         break;
       }
       case 'resume': {
         const id = tokens.get(msg.token);
         const acc = id && accounts.list().find((a) => a.id === id);
-        if (!acc) out(peerId, { k: 'auth', ok: false, error: 'Сессия устарела — войдите заново.' });
+        if (!acc) out(peerId, { k: 'auth', ok: false, error: 'Session expired — please sign in again.' });
         else bind(peerId, acc);
         break;
       }
@@ -956,7 +956,7 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
 }
 ```
 
-Note on the solo test: with one connected player, `maybeStart` sees everyone ready and starts at once. That is the intended behavior («соло» doesn't make you wait 10 s).
+Note on the solo test: with one connected player, `maybeStart` sees everyone ready and starts at once. That is the intended behavior (solo doesn't make you wait 10 s).
 
 - [ ] **Step 4: Run it and confirm it passes.** Run: `npm test`. All engine tests pass. Remove `server/show/smoke.test.js`.
 
@@ -1330,7 +1330,7 @@ export type ShowDown =
   | { k: 'event'; ev: ShowEvent }
   | { k: 'snapshot'; playerId: string; snap: ArenaSnapshot };
 
-export const ACT_TITLES: Record<number, string> = { 1: 'АКТ 1 · РАЗМИНКА', 2: 'АКТ 2 · СТАВКИ', 3: 'АКТ 3 · БЕЗ ПОЩАДЫ', 4: 'ФИНАЛ · БОСС' };
+export const ACT_TITLES: Record<number, string> = { 1: 'ACT 1 · WARM-UP', 2: 'ACT 2 · HIGH STAKES', 3: 'ACT 3 · NO MERCY', 4: 'FINALE · BOSS' };
 ```
 
 `deadline` is server-clock time. The store records `skew = Date.now() - state.now` on each `state` (`engine.js` `state()` includes `now: now()` since Task 5).
@@ -1401,7 +1401,7 @@ export class ShowStore {
       case 'accounts': this.accounts = msg.list; break;
       case 'auth':
         if (msg.ok) { this.me = msg.player; this.authError = ''; safeSet(TOKEN_KEY, msg.token); }
-        else { this.authError = msg.error; if (msg.error.startsWith('Сессия')) safeSet(TOKEN_KEY, null); }
+        else { this.authError = msg.error; if (msg.error.startsWith('Session')) safeSet(TOKEN_KEY, null); }
         break;
       case 'state':
         this.state = msg.show;
@@ -1579,11 +1579,11 @@ export function playerArenaScene(app: App, store: ShowStore): Scene {
       ctx.restore();
       const me = store.me;
       drawHud(ctx, run.arena, ARENA_W + GAP, 0, HUD_W, SCENE_H, {
-        title: me ? `${me.avatar} ${me.name}` : 'ИГРОК',
+        title: me ? `${me.avatar} ${me.name}` : 'PLAYER',
         accent: me?.color ?? '#4de2ff',
-        subtitle: `${ACT_TITLES[round.act]} · раунд ${round.index + 1}/${store.state?.rounds ?? 10}${round.boss ? ' · БОСС' : ''}`,
+        subtitle: `${ACT_TITLES[round.act]} · round ${round.index + 1}/${store.state?.rounds ?? 10}${round.boss ? ' · BOSS' : ''}`,
         fps: app.fps,
-        countdown: { label: 'осталось', seconds: Math.ceil(run.clock) },
+        countdown: { label: 'time left', seconds: Math.ceil(run.clock) },
       });
       ctx.restore();
     },
@@ -1668,15 +1668,15 @@ The server's `botHost` is a peer id and `net.selfId` is the id from `welcome`, s
 import { el } from './dom';
 
 export const MANUAL_POINTS = [
-  'Войдите под своим именем (или создайте игрока: имя, аватар, PIN из 4 цифр) и нажмите «Готов».',
-  'Каждый раунд — короткий уровень арканоида: мышь или ←/→, Пробел — запуск. Прошёл первым — бонус.',
-  'Очки решают место. Монеты (за кирпичи) тратятся в магазине между раундами.',
-  'Союзы: объединяйтесь до трёх человек, придумайте название — баффы только своим, дебаффы только чужим.',
-  '10 раундов в трёх актах, два босса: в конце второго акта и в финале. Побеждает больше очков.',
+  'Sign in as yourself (or create a player: name, avatar, 4-digit PIN) and press «Ready».',
+  'Every round is a short arkanoid level: mouse or ←/→, Space to launch. Clear it first for a bonus.',
+  'Points decide your place. Coins (from bricks) are spent in the shop between rounds.',
+  'Alliances: team up to three, give it a name — buffs go to allies only, debuffs to everyone else.',
+  '10 rounds in three acts, two bosses: at the end of act 2 and in the finale. Most points wins.',
 ];
 
 export const manualEl = (): HTMLElement =>
-  el('div', { class: 'manual' }, el('h3', {}, 'Как играть'), el('ol', {}, ...MANUAL_POINTS.map((p) => el('li', {}, p))));
+  el('div', { class: 'manual' }, el('h3', {}, 'How to play'), el('ol', {}, ...MANUAL_POINTS.map((p) => el('li', {}, p))));
 ```
 
 Points 3–4 describe stage 3–4 features. That is fine: the manual describes the finished game, and stage 2 is internal.
@@ -1695,18 +1695,18 @@ export function renderLogin(root: HTMLElement, store: ShowStore, ui: { picked: s
 
   if (ui.creating) {
     let avatar = AVATARS[0];
-    const name = el('input', { class: 'field', placeholder: 'Имя', maxlength: 16 });
-    const pin = el('input', { class: 'field', placeholder: 'PIN (4 цифры)', inputmode: 'numeric', maxlength: 4, type: 'password' });
+    const name = el('input', { class: 'field', placeholder: 'Name', maxlength: 16 });
+    const pin = el('input', { class: 'field', placeholder: 'PIN (4 digits)', inputmode: 'numeric', maxlength: 4, type: 'password' });
     const grid = el('div', { class: 'avatar-grid' });
     const paint = (): void => {
       grid.replaceChildren(...AVATARS.map((a) => button(a, () => { avatar = a; paint(); }, a === avatar ? 'avatar picked' : 'avatar')));
     };
     paint();
     root.replaceChildren(el('div', { class: 'show-panel' },
-      el('h2', {}, 'Новый игрок'), name, grid, pin, error,
+      el('h2', {}, 'New player'), name, grid, pin, error,
       el('div', { class: 'row' },
-        button('Назад', () => { ui.creating = false; store.authError = ''; rerender(); }, 'btn ghost'),
-        button('Создать', () => store.send({ k: 'register', name: name.value, avatar, pin: pin.value }), 'btn primary large')),
+        button('Back', () => { ui.creating = false; store.authError = ''; rerender(); }, 'btn ghost'),
+        button('Create', () => store.send({ k: 'register', name: name.value, avatar, pin: pin.value }), 'btn primary large')),
     ));
     name.focus();
     return;
@@ -1718,20 +1718,20 @@ export function renderLogin(root: HTMLElement, store: ShowStore, ui: { picked: s
     const go = (): void => store.send({ k: 'login', id: ui.picked!, pin: pin.value });
     pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     root.replaceChildren(el('div', { class: 'show-panel' },
-      el('h2', {}, `${acc?.avatar ?? ''} ${acc?.name ?? ''}`), el('p', { class: 'hint' }, 'Введите PIN'), pin, error,
+      el('h2', {}, `${acc?.avatar ?? ''} ${acc?.name ?? ''}`), el('p', { class: 'hint' }, 'Enter your PIN'), pin, error,
       el('div', { class: 'row' },
-        button('Назад', () => { ui.picked = null; store.authError = ''; rerender(); }, 'btn ghost'),
-        button('Войти', go, 'btn primary large')),
+        button('Back', () => { ui.picked = null; store.authError = ''; rerender(); }, 'btn ghost'),
+        button('Sign in', go, 'btn primary large')),
     ));
     pin.focus();
     return;
   }
 
   root.replaceChildren(el('div', { class: 'show-panel' },
-    el('h2', {}, 'Кто играет?'),
+    el('h2', {}, 'Who is playing?'),
     el('div', { class: 'account-grid' },
       ...store.accounts.map((a) => button(`${a.avatar} ${a.name}`, () => { ui.picked = a.id; rerender(); }, 'account')),
-      button('＋ Новый игрок', () => { ui.creating = true; rerender(); }, 'account new')),
+      button('＋ New player', () => { ui.creating = true; rerender(); }, 'account new')),
     error,
   ));
 }
@@ -1755,10 +1755,10 @@ export function renderLobby(root: HTMLElement, store: ShowStore): void {
     el('h2', {}, `${me.avatar} ${me.name}`),
     el('div', { class: 'roster' }, ...st.players.map((p) =>
       el('div', { class: `chip${p.ready ? ' ready' : ''}`, style: `--c:${p.color}` }, `${p.avatar} ${p.name}${p.ready ? ' ✓' : ''}`))),
-    st.countdownEnd ? el('p', { class: 'countdown' }, `Старт через ${secs}`) : el('p', { class: 'hint' }, 'Ждём, пока все нажмут «Готов»'),
-    button(me.ready ? 'Не готов' : 'Готов!', () => store.send({ k: 'ready', ready: !me.ready }), me.ready ? 'btn ghost large' : 'btn primary large'),
+    st.countdownEnd ? el('p', { class: 'countdown' }, `Starting in ${secs}`) : el('p', { class: 'hint' }, 'Waiting for everyone to press «Ready»'),
+    button(me.ready ? 'Not ready' : 'Ready!', () => store.send({ k: 'ready', ready: !me.ready }), me.ready ? 'btn ghost large' : 'btn primary large'),
     manualEl(),
-    button('Сменить игрока', () => store.logout(), 'btn ghost small'),
+    button('Switch player', () => store.logout(), 'btn ghost small'),
   ));
 }
 ```
@@ -1776,19 +1776,19 @@ export function renderWait(root: HTMLElement, store: ShowStore): void {
   const me = store.me;
   const ranked = [...st.players].filter((p) => p.inMatch).sort((a, b) => b.score - a.score);
   const title =
-    st.phase === 'intro' ? 'Шоу начинается!'
-    : st.phase === 'over' ? `Победитель: ${ranked[0]?.avatar ?? ''} ${ranked[0]?.name ?? ''}`
-    : st.phase === 'arena' ? 'Ждём остальных…'
-    : `Итоги раунда ${(st.round?.index ?? 0) + 1}`;
+    st.phase === 'intro' ? 'The show begins!'
+    : st.phase === 'over' ? `Winner: ${ranked[0]?.avatar ?? ''} ${ranked[0]?.name ?? ''}`
+    : st.phase === 'arena' ? 'Waiting for the others…'
+    : `Round ${(st.round?.index ?? 0) + 1} results`;
   const waitingFor = st.phase === 'arena' ? ranked.filter((p) => !p.result).map((p) => p.name).join(', ') : '';
   root.replaceChildren(el('div', { class: 'show-panel' },
     st.round ? el('p', { class: 'act' }, ACT_TITLES[st.round.act]) : null,
     el('h2', {}, title),
-    waitingFor ? el('p', { class: 'hint' }, `Ждём: ${waitingFor}`) : null,
+    waitingFor ? el('p', { class: 'hint' }, `Waiting for: ${waitingFor}`) : null,
     el('ol', { class: 'standings' }, ...ranked.map((p) =>
       el('li', { class: p.id === me?.id ? 'me' : '', style: `--c:${p.color}` },
         `${p.avatar} ${p.name}`, el('span', {}, `${p.score}${p.lastPoints ? ` (+${p.lastPoints})` : ''}`)))),
-    st.phase === 'over' ? button('Ещё раз', () => store.send({ k: 'restart' }), 'btn primary large') : null,
+    st.phase === 'over' ? button('Play again', () => store.send({ k: 'restart' }), 'btn primary large') : null,
   ));
 }
 ```
@@ -1918,18 +1918,18 @@ import type { PlayerPublic, ShowEvent } from '../../net/showProtocol';
 /** One human sentence per event, for the TV's running feed. */
 export function tickerLine(ev: ShowEvent, players: PlayerPublic[]): string {
   const p = players.find((x) => x.id === ev.playerId);
-  const who = p ? `${p.avatar} ${p.name}` : 'Кто-то';
+  const who = p ? `${p.avatar} ${p.name}` : 'Someone';
   switch (ev.kind) {
-    case 'joined': return `${who} в студии!`;
-    case 'left': return `${who} отключился`;
-    case 'ready': return p?.ready ? `${who} готов` : `${who} передумал`;
-    case 'matchStart': return '🎬 Шоу начинается!';
-    case 'roundStart': return '▶ Новый раунд — все на арену!';
-    case 'cleared': return ev.place === 0 ? `🏁 ${who} прошёл уровень ПЕРВЫМ! +${ev.points}` : `✅ ${who} прошёл уровень (+${ev.points})`;
-    case 'died': return `💥 ${who} потерял все жизни (+${ev.points ?? 0})`;
-    case 'timeout': return `⏱ ${who} не успел (+${ev.points ?? 0})`;
-    case 'roundEnd': return '📊 Раунд окончен';
-    case 'matchOver': return `🏆 Победитель — ${who}!`;
+    case 'joined': return `${who} is in the studio!`;
+    case 'left': return `${who} disconnected`;
+    case 'ready': return p?.ready ? `${who} is ready` : `${who} changed their mind`;
+    case 'matchStart': return '🎬 The show begins!';
+    case 'roundStart': return '▶ New round — everyone to the arena!';
+    case 'cleared': return ev.place === 0 ? `🏁 ${who} cleared the level FIRST! +${ev.points}` : `✅ ${who} cleared the level (+${ev.points})`;
+    case 'died': return `💥 ${who} lost every life (+${ev.points ?? 0})`;
+    case 'timeout': return `⏱ ${who} ran out of time (+${ev.points ?? 0})`;
+    case 'roundEnd': return '📊 Round over';
+    case 'matchOver': return `🏆 The winner is ${who}!`;
   }
 }
 ```
@@ -1959,7 +1959,7 @@ export function drawArenaGrid(ctx: CanvasRenderingContext2D, x: number, y: numbe
     ctx.translate(cx + (cw - fw) / 2, cy + caption);
     ctx.scale(scale, scale);
     const m = mirrors.get(p.id);
-    if (m) drawSnapshotMirror(ctx, m, p.color, p.result ? (p.result.cleared ? 'ПРОШЁЛ ✓' : 'ВЫБЫЛ') : 'Ждём поле…');
+    if (m) drawSnapshotMirror(ctx, m, p.color, p.result ? (p.result.cleared ? 'CLEARED ✓' : 'OUT') : 'Waiting for field…');
     ctx.restore();
     ctx.save();
     ctx.fillStyle = p.color;
@@ -1983,12 +1983,12 @@ Check the `drawSnapshotMirror` signature: `(ctx, mirror, color, waitingLabel)` p
       ctx.fillStyle = p.result.cleared ? '#3ddc84' : '#ff4d6d';
       ctx.font = `bold ${Math.round(40 * scale + 14)}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(p.result.cleared ? `ПРОШЁЛ +${p.lastPoints}` : `+${p.lastPoints}`, fw / 2, (ARENA_H * scale) / 2);
+      ctx.fillText(p.result.cleared ? `CLEARED +${p.lastPoints}` : `+${p.lastPoints}`, fw / 2, (ARENA_H * scale) / 2);
       ctx.restore();
     }
 ```
 
-Use the plain `'Ждём поле…'` as the waiting label.
+Use the plain `'Waiting for field…'` as the waiting label.
 
 - [ ] **Step 3: `src/game/tv/lobby.ts` and `standings.ts`**
 
@@ -2005,13 +2005,13 @@ export function renderTvLobby(root: HTMLElement, store: ShowStore): void {
   const secs = Math.ceil(store.secondsUntil(st?.countdownEnd ?? null));
   root.replaceChildren(el('div', { class: 'tv-lobby' },
     el('h1', {}, 'ARCOQUIZ'),
-    el('p', { class: 'tv-url' }, `Заходите: ${net.shareUrl}`),
+    el('p', { class: 'tv-url' }, `Join at: ${net.shareUrl}`),
     el('div', { class: 'tv-roster' }, ...players.map((p) =>
       el('div', { class: `tv-seat${p.ready ? ' ready' : ''}`, style: `--c:${p.color}` },
-        el('div', { class: 'tv-avatar' }, p.avatar), el('div', {}, p.name), el('div', { class: 'hint' }, p.ready ? 'готов' : '…')))),
-    players.length ? null : el('p', { class: 'hint' }, 'Пока никого — откройте адрес на телефоне'),
-    st?.countdownEnd ? el('p', { class: 'countdown' }, `Старт через ${secs}`) : null,
-    players.length === 1 ? el('p', { class: 'hint' }, 'Один игрок? Против него выйдет 🤖 Бот.') : null,
+        el('div', { class: 'tv-avatar' }, p.avatar), el('div', {}, p.name), el('div', { class: 'hint' }, p.ready ? 'ready' : '…')))),
+    players.length ? null : el('p', { class: 'hint' }, 'Nobody yet — open the address on your phone'),
+    st?.countdownEnd ? el('p', { class: 'countdown' }, `Starting in ${secs}`) : null,
+    players.length === 1 ? el('p', { class: 'hint' }, 'Just one player? 🤖 Bot will take them on.') : null,
     manualEl(),
   ));
 }
@@ -2027,8 +2027,8 @@ import type { ShowStore } from '../show/store';
 export function renderStandings(root: HTMLElement, store: ShowStore): void {
   const st = store.state!;
   const ranked = st.players.filter((p) => p.inMatch).sort((a, b) => b.score - a.score);
-  const title = st.phase === 'intro' ? 'Сегодня в студии' : st.phase === 'over' ? '🏆 ФИНАЛ' : `Итоги раунда ${(st.round?.index ?? 0) + 1}`;
-  const next = st.phase === 'roundEnd' && st.round && st.round.index + 1 < st.rounds ? `Дальше: раунд ${st.round.index + 2}` : '';
+  const title = st.phase === 'intro' ? 'Tonight in the studio' : st.phase === 'over' ? '🏆 FINAL' : `Round ${(st.round?.index ?? 0) + 1} results`;
+  const next = st.phase === 'roundEnd' && st.round && st.round.index + 1 < st.rounds ? `Next: round ${st.round.index + 2}` : '';
   root.replaceChildren(el('div', { class: 'tv-standings' },
     st.round ? el('p', { class: 'act' }, ACT_TITLES[st.round.act]) : null,
     el('h1', {}, title),
@@ -2098,15 +2098,15 @@ export function tvShowScene(app: App): Scene {
       ctx.save();
       ctx.fillStyle = '#b06bff';
       ctx.font = 'bold 26px system-ui, sans-serif';
-      ctx.fillText(`${ACT_TITLES[st.round.act]} · РАУНД ${st.round.index + 1}/${st.rounds}${st.round.boss ? ' · 👾 БОСС' : ''}`, 24, 44);
+      ctx.fillText(`${ACT_TITLES[st.round.act]} · ROUND ${st.round.index + 1}/${st.rounds}${st.round.boss ? ' · 👾 BOSS' : ''}`, 24, 44);
       ctx.textAlign = 'right';
       ctx.fillStyle = secs <= 10 ? '#ff4d6d' : '#ffd24d';
-      ctx.fillText(`${Math.max(0, secs)} с`, w - 24, 44);
+      ctx.fillText(`${Math.max(0, secs)} s`, w - 24, 44);
       const waiting = racers.filter((p) => !p.result).map((p) => p.name);
       ctx.textAlign = 'center';
       ctx.font = '18px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(232,242,255,0.7)';
-      if (waiting.length && waiting.length < racers.length) ctx.fillText(`Ждём: ${waiting.join(', ')}`, w / 2, 44);
+      if (waiting.length && waiting.length < racers.length) ctx.fillText(`Waiting for: ${waiting.join(', ')}`, w / 2, 44);
       ctx.restore();
       drawArenaGrid(ctx, 0, HEADER_H, w, h - HEADER_H - TICKER_H, racers, mirrors);
     },
@@ -2129,14 +2129,14 @@ import { button, el } from './dom';
 import { playerShowScene } from '../game/player';
 import { tvShowScene } from '../game/tv';
 
-/** «Я играю» or «Это экран-ТВ». `?role=tv` / `?role=player` skip it. */
+/** «I'm playing» or «This is the TV». `?role=tv` / `?role=player` skip it. */
 export const startScene: SceneFactory = (app): Scene => {
   app.overlay.classList.add('interactive');
   app.overlay.replaceChildren(el('div', { class: 'start' },
     el('h1', {}, 'ARCOQUIZ'),
-    el('p', { class: 'hint' }, 'Арканоид-викторина. Ведущий — ИИ. До 10 игроков.'),
-    button('🎮 Я играю', () => app.setScene(playerShowScene), 'btn primary large'),
-    button('📺 Это экран-ТВ', () => app.setScene(tvShowScene), 'btn large'),
+    el('p', { class: 'hint' }, 'An arkanoid quiz show. Hosted by AI. Up to 10 players.'),
+    button('🎮 I\'m playing', () => app.setScene(playerShowScene), 'btn primary large'),
+    button('📺 This is the TV', () => app.setScene(tvShowScene), 'btn large'),
   ));
   return {
     update() {},
@@ -2179,20 +2179,60 @@ Append TV CSS to `src/ui/show.css`:
 
 ---
 
-### Task 12: Docs and an end-to-end run
+### Task 12: English everywhere
+
+Before this task, Russian text still lives in files the show inherited from the old game: power-up, ball, brick, boss and debuff names; award lines; float-up texts in `src/render/fx.ts`; words on bricks (the `signs` theme in `levelGen.ts`, and its glyphs in `glyphs.ts`); server port-error messages; `index.html`. Measured at `f9703bc` there were about 270 lines across 20 files.
+
+**Files:**
+- Modify: every file listed by `grep -rlE "[А-Яа-яЁё]" src server index.html | grep -v server/data`. Representative files: `src/core/powerups.ts`, `src/core/balls.ts`, `src/core/bricks.ts`, `src/core/bosses.ts`, `src/core/debuffs.ts`, `src/core/awards.ts`, `src/core/levelGen.ts`, `src/core/glyphs.ts`, `src/render/fx.ts`, `server/index.js`, `index.html`.
+
+**Interfaces:**
+- Produces: no API change. Only string literals and comments change; identifiers stay as they are.
+
+- [ ] **Step 1: List every hit**
+
+Run `grep -rnE "[А-Яа-яЁё]" src server index.html | grep -v server/data > .superpowers/sdd/2026-09-23-arcoquiz-show-stage1-2/ru-strings.txt` and classify each line:
+- (a) user-visible string: translate to short, punchy English that fits the same space (HUD and brick labels are narrow);
+- (b) comment: translate;
+- (c) glyph/bitmap data for Cyrillic letters in `glyphs.ts`: see Step 2.
+
+- [ ] **Step 2: Words on bricks**
+
+If the `signs` theme draws Russian words from `glyphs.ts`:
+- replace the word list with English words of the same or smaller length;
+- make sure `glyphs.ts` has every Latin letter those words use. Add missing Latin glyphs in the same bitmap format as the existing entries;
+- delete Cyrillic glyph entries that are no longer referenced.
+
+Then run `npm run dev` and check three `RACE_LEVELS` that use signs: each word must render.
+
+- [ ] **Step 3: Gate**
+
+Run `grep -rnE "[А-Яа-яЁё]" src server index.html | grep -v server/data`. Expected: no output.
+
+Run `npm run typecheck && npm test && npm run build`. Expected: all pass.
+
+- [ ] **Step 4: Visual check**
+
+Run `npm run lan`, open a player window and play one arena. Power-up pickups, the boss name and the HUD must read in English, and nothing may overflow its box.
+
+- [ ] **Step 5: Commit** with the message `Speak English everywhere on screen`, plus the Co-Authored-By trailer.
+
+---
+
+### Task 13: Docs and an end-to-end run
 
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`, `package.json` (`name` → `arcoquiz`, `description`)
 
-- [ ] **Step 1: Rewrite `README.md`** (Russian). Sections:
-  - Запуск (`npm install`, `npm run lan`, PORT);
-  - Как играть: the 5 `MANUAL_POINTS` verbatim;
-  - Роли (ТВ `?role=tv`, игрок `?role=player`);
-  - Учётки (`server/data/players.json`, PIN);
-  - Устройство кода (the new directory map);
-  - Тесты (`npm test`).
+- [ ] **Step 1: Rewrite `README.md`** (English). Sections:
+  - Running it (`npm install`, `npm run lan`, PORT);
+  - How to play: the 5 `MANUAL_POINTS` verbatim;
+  - Roles (TV `?role=tv`, player `?role=player`);
+  - Accounts (`server/data/players.json`, PIN);
+  - Code layout (the new directory map);
+  - Tests (`npm test`).
   
-  Drop every mention of Своя игра, ведущий-человек, трек и кубик.
+  Drop every mention of the Jeopardy board, the human host, the track and the dice.
 
 - [ ] **Step 2: Rewrite `CLAUDE.md`'s architecture section**:
   - the server now **directs** the show (`server/show/engine.js`: phases, timers, scoring, accounts). Clients simulate arenas and report `ArenaResult`. The TV or first player runs bot arenas (`botRunner.ts`);
@@ -2209,14 +2249,14 @@ npm run typecheck && npm test && PORT=8090 npm run lan
 ```
 
 In **separate browser windows**:
-1. Open `http://localhost:8090/?role=tv`. Expect the lobby: ARCOQUIZ, URL, the manual, and «Пока никого».
-2. Open `?role=player`. Create «Тест1» (🦊, PIN 1111). Expect the lobby with you on the roster, and the TV showing the seat.
-3. Press «Готов». Expect: the match starts immediately, and the TV shows «Сегодня в студии» with you and 🤖 Бот. After 6 s you get your arena, and the TV shows two live fields, the header with АКТ 1 and the timer.
-4. Clear or lose. Expect the TV ticker line, the «Ждём: Бот» hint until the bot reports, then «Итоги раунда 1» on both screens.
-5. Let it run to round 6. Expect «👾 БОСС» in the header and a boss level on both fields. Round 10 is a boss too, and a different one.
+1. Open `http://localhost:8090/?role=tv`. Expect the lobby: ARCOQUIZ, URL, the manual, and «Nobody yet».
+2. Open `?role=player`. Create «Test1» (🦊, PIN 1111). Expect the lobby with you on the roster, and the TV showing the seat.
+3. Press «Ready!». Expect: the match starts immediately, and the TV shows «Tonight in the studio» with you and 🤖 Bot. After 6 s you get your arena, and the TV shows two live fields, the header with ACT 1 and the timer.
+4. Clear or lose. Expect the TV ticker line, the «Waiting for: Bot» hint until the bot reports, then «Round 1 results» on both screens.
+5. Let it run to round 6. Expect «👾 BOSS» in the header and a boss level on both fields. Round 10 is a boss too, and a different one.
 6. Close the player window and reopen `?role=player`. Expect it resumes into the same account without the PIN (token).
 7. A second player window: log in as a new account during the match. Expect it to see the waiting view (`inMatch=false`), with no arena.
-8. At «ФИНАЛ», press «Ещё раз». Expect everyone back in the lobby, unready, and the bot removed.
+8. At «FINAL», press «Play again». Expect everyone back in the lobby, unready, and the bot removed.
 9. Restart the server. Expect accounts to persist, and `server/data/players.json` to hold no raw PIN.
 
 Record any failure. Fix it via superpowers:systematic-debugging before claiming done.
@@ -2236,13 +2276,13 @@ Record any failure. Fix it via superpowers:systematic-debugging before claiming 
   - engine handlers `allianceCreate{name}`, `allianceInvite{playerId}`, `allianceAccept{allianceId}`, `allianceJoinRequest`, `allianceRename{name}`, `allianceLeave`;
   - max 3; dissolve at 1; +50 when all members answer right; buff/debuff target rules enforced on the server at purchase.
 - **Stage 5 — TV production:**
-  - a spotlight tile, phase bumpers («АКТ 2 · СТАВКИ»), an animated table reorder, confetti, a QR code (vendored tiny generator);
+  - a spotlight tile, phase bumpers («ACT 2 · HIGH STAKES»), an animated table reorder, confetti, a QR code (vendored tiny generator);
   - the host bar with `speechSynthesis`;
   - `server/show/host.js` template lines per `ShowEvent` kind.
-- **Stage 6 — content:**
+- **Stage 6 — content (all questions in English):**
   - ~60 questions about 42 projects (Codexion, CallMeMayBe, Fly-in, PythonTester), ~40 on tarot/runes plus a generator from `/Users/Oleg/Claude_Projects/runes` data, and "about you" templates plus a lobby questionnaire;
   - no Italian content; archive `jeopardy.json`.
 - **Stage 7 — show polish:**
-  - special inserts (vote «кто из вас», duel, revenge);
+  - special inserts (vote «which of you…», duel, revenge);
   - optional Claude lines (`claude-haiku-4-5`, 2 s timeout, template fallback);
   - the stats page per account.
