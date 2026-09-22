@@ -185,10 +185,12 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
 
   function applyResult(p, result) {
     if (p.result) return;
+    const r = schedule[roundIdx];
+    const roundSeconds = r.boss ? DUR.bossArena : DUR.arena;
     const clean = {
       cleared: Boolean(result?.cleared),
       died: Boolean(result?.died),
-      timeLeft: Math.max(0, Number(result?.timeLeft) || 0),
+      timeLeft: Math.min(roundSeconds, Math.max(0, Number(result?.timeLeft) || 0)),
       bricks: Math.max(0, Math.floor(Number(result?.bricks) || 0)),
       livesLost: Math.max(0, Math.floor(Number(result?.livesLost) || 0)),
     };
@@ -216,7 +218,12 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
     event('matchOver', { playerId: ranked[0]?.id });
     pushState();
     for (const p of ranked) {
-      if (!p.isBot) await accounts.recordMatch(p.id, { won: p === ranked[0], score: p.score });
+      if (p.isBot) continue;
+      try {
+        await accounts.recordMatch(p.id, { won: p === ranked[0], score: p.score });
+      } catch (err) {
+        console.error(`Failed to save match stats for player ${p.id}: ${err.message}`);
+      }
     }
   }
 

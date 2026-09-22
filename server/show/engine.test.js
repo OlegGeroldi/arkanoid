@@ -229,3 +229,29 @@ test('restart from over returns everyone to the lobby, unready', async () => {
   assert.equal(st.phase, 'lobby');
   assert.ok(st.players.every((p) => !p.ready || p.isBot));
 });
+
+test('a failed stats save does not crash the server or skip the other player', async () => {
+  const s = await startedDuo();
+  s.accounts.recordMatch = async (id, r) => {
+    if (id === 'u1') throw new Error('disk full');
+    s.accounts.recorded.push({ id, ...r });
+  };
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    for (let i = 0; i < 40 && s.eng.state().phase !== 'over'; i++) s.advance(DUR.bossArena + DUR.grace + 1);
+    assert.equal(s.eng.state().phase, 'over');
+    // Let the endMatch promise chain (including the rejected recordMatch) settle.
+    await new Promise((r) => setImmediate(r));
+  } finally {
+    console.error = originalError;
+  }
+  assert.ok(s.accounts.recorded.some((r) => r.id === 'u2'));
+  assert.ok(!s.accounts.recorded.some((r) => r.id === 'u1'));
+});
+
+test('reported time cannot exceed the round clock', async () => {
+  const { eng } = await startedDuo();
+  await eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 9999 }) });
+  assert.equal(eng.state().players.find((p) => p.id === 'u1').score, 100 + DUR.arena + 50);
+});
