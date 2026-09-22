@@ -1,0 +1,100 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createShowEngine } from './engine.js';
+import { DUR } from './constants.js';
+
+function fakeAccounts() {
+  const list = [
+    { id: 'u1', name: 'Anya', avatar: '🦊', stats: { matches: 0, wins: 0, best: 0 } },
+    { id: 'u2', name: 'Oleg', avatar: '🐸', stats: { matches: 0, wins: 0, best: 0 } },
+  ];
+  const recorded = [];
+  return {
+    recorded,
+    list: () => list,
+    verify: (id, pin) => (pin === '1111' ? list.find((a) => a.id === id) ?? null : null),
+    register: async () => { throw new Error('unused'); },
+    recordMatch: async (id, r) => { recorded.push({ id, ...r }); },
+  };
+}
+
+function setup() {
+  let t = 1_000_000;
+  const accounts = fakeAccounts();
+  const eng = createShowEngine({ now: () => t, accounts, seed: () => 42 });
+  return { eng, accounts, advance: (s) => { t += s * 1000; eng.tick(); }, now: () => t };
+}
+
+const login = async (eng, peer, id) => {
+  eng.connect(peer);
+  await eng.handle(peer, { k: 'hello', role: 'player' });
+  await eng.handle(peer, { k: 'login', id, pin: '1111' });
+};
+
+test('login with a wrong PIN is refused', async () => {
+  const { eng } = setup();
+  eng.connect('p1');
+  await eng.handle('p1', { k: 'hello', role: 'player' });
+  eng.drain();
+  await eng.handle('p1', { k: 'login', id: 'u1', pin: '0000' });
+  const out = eng.drain();
+  assert.ok(out.some((o) => o.to === 'p1' && o.msg.k === 'auth' && o.msg.ok === false));
+  assert.equal(eng.state().players.length, 0);
+});
+
+test('first ready starts a countdown; everyone ready starts at once', async () => {
+  const { eng } = setup();
+  await login(eng, 'p1', 'u1');
+  await login(eng, 'p2', 'u2');
+  await eng.handle('p1', { k: 'ready', ready: true });
+  assert.ok(eng.state().countdownEnd);
+  assert.equal(eng.state().phase, 'lobby');
+  await eng.handle('p2', { k: 'ready', ready: true });
+  assert.equal(eng.state().phase, 'intro');
+  assert.equal(eng.state().players.filter((p) => p.inMatch).length, 2);
+  assert.ok(!eng.state().players.some((p) => p.isBot));
+});
+
+test('a solo player gets the bot when the countdown runs out', async () => {
+  const { eng, advance } = setup();
+  await login(eng, 'p1', 'u1');
+  eng.connect('tv');
+  await eng.handle('tv', { k: 'hello', role: 'tv' });
+  await eng.handle('p1', { k: 'ready', ready: true });
+  assert.equal(eng.state().phase, 'intro'); // the only player is ready → start now
+  const bot = eng.state().players.find((p) => p.isBot);
+  assert.ok(bot && bot.inMatch);
+  assert.equal(eng.state().botHost, 'tv');
+});
+
+test('countdown expiry starts with only the ready players', async () => {
+  const { eng, advance } = setup();
+  await login(eng, 'p1', 'u1');
+  await login(eng, 'p2', 'u2');
+  await eng.handle('p1', { k: 'ready', ready: true });
+  advance(DUR.countdown + 0.1);
+  const st = eng.state();
+  assert.equal(st.phase, 'intro');
+  assert.deepEqual(st.players.filter((p) => p.inMatch).map((p) => p.id).sort(), ['bot', 'u1']);
+});
+
+test('resume with a token re-binds the account to a new peer', async () => {
+  const { eng } = setup();
+  await login(eng, 'p1', 'u1');
+  const auth = eng.drain().find((o) => o.msg.k === 'auth' && o.msg.ok);
+  eng.disconnect('p1');
+  assert.equal(eng.state().players.find((p) => p.id === 'u1').connected, false);
+  eng.connect('p9');
+  await eng.handle('p9', { k: 'resume', token: auth.msg.token });
+  assert.equal(eng.state().players.find((p) => p.id === 'u1').connected, true);
+});
+
+test('no more than 10 players', async () => {
+  const many = Array.from({ length: 11 }, (_, i) => ({ id: `x${i}`, name: `N${i}`, avatar: '🦊', stats: {} }));
+  const accounts = { ...fakeAccounts(), list: () => many, verify: (id) => many.find((a) => a.id === id) };
+  const e2 = createShowEngine({ now: () => 0, accounts, seed: () => 1 });
+  for (let i = 0; i < 11; i++) await login(e2, `p${i}`, `x${i}`);
+  assert.equal(e2.state().players.length, 10);
+  const refused = e2.drain().filter((o) => o.to === 'p10' && o.msg.k === 'auth' && !o.msg.ok);
+  assert.equal(refused.length, 1);
+});
