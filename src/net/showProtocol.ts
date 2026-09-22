@@ -88,3 +88,7 @@ export type ShowDown =
   | { k: 'snapshot'; playerId: string; snap: ArenaSnapshot };
 
 export const ACT_TITLES: Record<number, string> = { 1: 'ACT 1 · WARM-UP', 2: 'ACT 2 · HIGH STAKES', 3: 'ACT 3 · NO MERCY', 4: 'FINALE · BOSS' };
+
+/** Mirrors `server/show/constants.js` `DUR.grace` — the extra seconds the
+ *  server keeps a round open past its nominal length before force-ending it. */
+export const ARENA_GRACE = 8;
