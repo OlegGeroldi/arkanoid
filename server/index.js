@@ -159,7 +159,7 @@ wss.on('connection', (ws) => {
         void show.handle(ws.peerId, msg.msg).then(flush, (err) => {
           console.error('show.handle failed:', err);
           flush();
-        });
+        }).catch((err) => console.error('show flush failed:', err));
         break;
 
       default:
