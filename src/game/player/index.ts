@@ -2,6 +2,7 @@ import type { App, Scene } from '../../app';
 import { ShowStore } from '../show/store';
 import { startBotRunner } from '../show/botRunner';
 import { playerArenaScene } from './arena';
+import type { ArenaResult, ShowState } from '../../net/showProtocol';
 import { renderLogin } from './login';
 import { renderLobby } from './lobby';
 import { renderWait } from './wait';
@@ -15,15 +16,31 @@ export function playerShowScene(app: App): Scene {
   let arena: Scene | null = null;
   let arenaRound = -1;
   let lastKey = '';
+  /** This device's finished result for a round, kept so it can be re-sent if
+   *  it went out while the socket was down (the server still shows null). */
+  let finished: { round: number; result: ArenaResult } | null = null;
+  let resentFor: ShowState | null = null;
+  const report = (result: ArenaResult): void => {
+    finished = { round: arenaRound, result };
+    resentFor = store.state;
+    store.send({ k: 'result', result });
+  };
 
   function render(): void {
     const st = store.state;
     const me = store.me;
+    // Round indices repeat across matches: only keep a result within its arena.
+    if (st && st.phase !== 'arena') finished = null;
+    if (st && st !== resentFor && st.phase === 'arena' && me?.inMatch && me.result === null
+      && finished && st.round?.index === finished.round) {
+      resentFor = st;
+      store.send({ k: 'result', result: finished.result });
+    }
     const myArena = st?.phase === 'arena' && me?.inMatch && !me.result && st.round;
     if (myArena && st.round!.index !== arenaRound) {
       arenaRound = st.round!.index;
       arena?.dispose();
-      arena = playerArenaScene(app, store);
+      arena = playerArenaScene(app, store, report);
       return;
     }
     if (arena && !(st?.phase === 'arena' && me && !me.result)) { arena.dispose(); arena = null; }

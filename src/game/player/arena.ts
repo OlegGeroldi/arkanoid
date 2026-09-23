@@ -8,17 +8,20 @@ import { music } from '../../audio/music';
 import { SOLO_KEYS } from '../input';
 import { ArenaRun } from '../show/arenaRunner';
 import type { ShowStore } from '../show/store';
-import { ACT_TITLES } from '../../net/showProtocol';
+import { ACT_TITLES, ARENA_GRACE, type ArenaResult } from '../../net/showProtocol';
 
 const HUD_W = 260;
 const GAP = 16;
 const SCENE_W = ARENA_W + GAP + HUD_W;
 const SCENE_H = ARENA_H;
 
-/** The human's own arena for the current round. Reports once, then waits. */
-export function playerArenaScene(app: App, store: ShowStore): Scene {
+/** The human's own arena for the current round. Reports once (through
+ *  `report`, so the caller can re-send it if the socket was down), then waits. */
+export function playerArenaScene(app: App, store: ShowStore, report: (result: ArenaResult) => void): Scene {
   const round = store.state!.round!;
-  const run = new ArenaRun(round.levelIndex, round.seconds, app.profile.favouriteSuper);
+  // A rejoin mid-round follows the server clock, not a fresh full round.
+  const seconds = Math.max(1, Math.min(round.seconds, store.secondsUntil(store.state!.deadline) - ARENA_GRACE));
+  const run = new ArenaRun(round.levelIndex, seconds, app.profile.favouriteSuper);
   run.arena.equipSkills(app.profile.skills);
   const fx = new ArenaFx();
   let t = 0;
@@ -35,7 +38,7 @@ export function playerArenaScene(app: App, store: ShowStore): Scene {
       t += dt;
       fx.update(dt);
       if (run.done) {
-        if (!reported) { reported = true; store.send({ k: 'result', result: run.done }); }
+        if (!reported) { reported = true; report(run.done); }
         return;
       }
       const p = app.pointer;
@@ -66,7 +69,7 @@ export function playerArenaScene(app: App, store: ShowStore): Scene {
       ctx.restore();
     },
     dispose() {
-      if (!reported && run.done) store.send({ k: 'result', result: run.done });
+      if (!reported && run.done) report(run.done);
       music.setScene('menu');
     },
   };
