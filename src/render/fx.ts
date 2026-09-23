@@ -63,7 +63,7 @@ export class ArenaFx {
           break;
         }
         case 'levelup':
-          this.text(240, 380, `УРОВЕНЬ ${e.level}`, '#ffd24d');
+          this.text(240, 380, `LEVEL ${e.level}`, '#ffd24d');
           break;
         case 'super': {
           const def = SUPERS[e.id];
@@ -72,13 +72,13 @@ export class ArenaFx {
           break;
         }
         case 'garbage':
-          this.text(240, 120, 'АТАКА!', '#ff4d6d');
+          this.text(240, 120, 'ATTACK!', '#ff4d6d');
           break;
         case 'bossHit':
           this.burst(e.x, e.y, e.color, 10, 150);
           break;
         case 'bossPhase':
-          this.text(240, 250, e.phase === 3 ? 'БОСС В ЯРОСТИ' : 'ЩИТ ПРОБИТ', '#ff4d6d');
+          this.text(240, 250, e.phase === 3 ? 'BOSS ENRAGED' : 'SHIELD BROKEN', '#ff4d6d');
           this.ring(240, 120, 300, '#ff4d6d');
           break;
         case 'prop':
@@ -86,21 +86,21 @@ export class ArenaFx {
           if (e.score >= 40) this.text(e.x, e.y - 18, `+${e.score}`, PROPS[e.kind].color);
           break;
         case 'targetsDown':
-          this.text(240, 260, 'МИШЕНИ СБИТЫ', '#3ddc84');
+          this.text(240, 260, 'TARGETS DOWN', '#3ddc84');
           this.ring(e.x, e.y, 120, '#3ddc84');
           break;
         case 'multiball':
-          this.text(240, 280, 'ДЖЕКПОТ · МУЛЬТИБОЛ', '#ffd24d');
+          this.text(240, 280, 'JACKPOT · MULTIBALL', '#ffd24d');
           this.ring(e.x, e.y, 150, '#ffd24d');
           break;
         case 'slot': {
           const line: Record<string, string> = {
-            chips: 'ДВЕ В РЯД +120',
-            life: '777 — ЛИШНЯЯ ЖИЗНЬ',
-            pot: '★★★ — БАНК УДВОЕН',
-            super: '⚡⚡⚡ — СУПЕР ЗАРЯЖЕН',
-            capsule: '✚✚✚ — КАПСУЛА НАВЕРХУ',
-            bust: '☠☠☠ — ПОЛБАНКА СГОРЕЛО',
+            chips: 'TWO IN A ROW +120',
+            life: '777 — EXTRA LIFE',
+            pot: '★★★ — POT DOUBLED',
+            super: '⚡⚡⚡ — SUPER CHARGED',
+            capsule: '✚✚✚ — CAPSULE UP TOP',
+            bust: '☠☠☠ — HALF THE POT BURNED',
           };
           this.text(240, 240, line[e.kind], e.kind === 'bust' ? '#ff4d6d' : '#ffd24d');
           this.ring(e.x, e.y, e.kind === 'chips' ? 70 : 130, e.kind === 'bust' ? '#ff4d6d' : '#ffd24d');
@@ -110,26 +110,26 @@ export class ArenaFx {
           this.text(
             240,
             300,
-            e.won ? `${e.double ? 'ДАБЛ! БАНК ' : 'БАНК ВЗЯТ '}+${e.amount}` : `БАНК СГОРЕЛ −${e.amount}`,
+            e.won ? `${e.double ? 'DOUBLE! POT ' : 'POT WON '}+${e.amount}` : `POT BURNED −${e.amount}`,
             e.won ? '#ffd24d' : '#ff4d6d',
           );
           this.ring(e.x, e.y, e.won ? 140 : 90, e.won ? '#ffd24d' : '#ff4d6d');
           break;
         case 'bossGrab':
-          this.text(240, 300, e.taken ? 'МЯЧ ЗАХВАЧЕН' : 'МЯЧ ОТПУЩЕН', e.taken ? '#ff2d55' : '#ffd24d');
+          this.text(240, 300, e.taken ? 'BALL GRABBED' : 'BALL RELEASED', e.taken ? '#ff2d55' : '#ffd24d');
           this.ring(e.x, e.y, e.taken ? 160 : 120, e.taken ? '#ff2d55' : '#ffd24d');
           break;
         case 'bossShotHit':
           this.burst(e.x, e.y, '#ff4d6d', 16, 200);
-          this.text(240, 560, 'РАКЕТКА ПОВРЕЖДЕНА', '#ff4d6d');
+          this.text(240, 560, 'PADDLE DAMAGED', '#ff4d6d');
           break;
         case 'bossDead':
-          this.text(240, 300, 'БОСС ПОВЕРЖЕН', '#ffd24d');
+          this.text(240, 300, 'BOSS DEFEATED', '#ffd24d');
           this.ring(240, 120, 420, '#ffd24d');
           this.burst(240, 120, '#ffd24d', 60, 320);
           break;
         case 'lifeLost':
-          this.text(240, 520, 'МЯЧ ПОТЕРЯН', '#ff4d6d');
+          this.text(240, 520, 'BALL LOST', '#ff4d6d');
           break;
         default:
           break;

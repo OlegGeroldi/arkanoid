@@ -100,13 +100,13 @@ const rooms = new Map();
  *  the chance to run. */
 function onListenError(err) {
   if (err.code !== 'EADDRINUSE') throw err;
-  console.error(`\n  Порт ${PORT} уже занят — сервер уже где-то запущен.`);
-  console.error('  Остановите тот запуск (Ctrl+C в его окне) или закройте процесс:\n');
+  console.error(`\n  Port ${PORT} is already in use — a server is already running somewhere.`);
+  console.error('  Stop that run (Ctrl+C in its window) or kill the process:\n');
   console.error(`      lsof -ti tcp:${PORT} | xargs kill\n`);
-  console.error('  Можно и просто занять другой порт:\n');
+  console.error('  Or just use a different port:\n');
   console.error(`      PORT=8081 npm run lan\n`);
-  console.error('  Оставлять как есть нельзя: игроки получат новый клиент со старым');
-  console.error('  сервером, и матч по сети не соберётся.\n');
+  console.error('  Do not leave it as is: players would get the new client talking to the old');
+  console.error('  server, and the LAN match would never come together.\n');
   process.exit(1);
 }
 
@@ -196,20 +196,20 @@ function localAddresses() {
 server.listen(PORT, () => {
   const addresses = localAddresses();
   console.log('');
-  console.log('  ARCOQUIZ — сервер локальной сети');
+  console.log('  ARCOQUIZ — LAN server');
   console.log('  ---------------------------------------');
   if (!existsSync(join(DIST, 'index.html'))) {
-    console.log('  ВНИМАНИЕ: папки dist нет. Соберите игру: npm run build');
+    console.log('  WARNING: no dist folder. Build the game: npm run build');
     console.log('');
   }
-  console.log(`  На этом компьютере:  http://localhost:${PORT}`);
+  console.log(`  On this computer:  http://localhost:${PORT}`);
   for (const address of addresses) {
-    console.log(`  В локальной сети:    http://${address}:${PORT}`);
+    console.log(`  On the LAN:        http://${address}:${PORT}`);
   }
   if (!addresses.length) {
-    console.log('  Сетевых адресов не найдено — проверьте подключение к Wi-Fi.');
+    console.log('  No network addresses found — check your Wi-Fi connection.');
   }
   console.log('');
-  console.log('  Остановить: Ctrl+C');
+  console.log('  Stop: Ctrl+C');
   console.log('');
 });

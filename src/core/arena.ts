@@ -1926,7 +1926,7 @@ export class Arena {
     }
   }
 
-  // ----------------------------------------------------------------- супер --
+  // ------------------------------------------------------------------ super --
 
   /** Every charge the super gets goes through here, so a super that fills at
    *  its own pace only has to say so once, in its definition. */

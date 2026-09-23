@@ -57,7 +57,7 @@ export function normalizeLevel(raw: unknown, fallbackId = 'custom'): LevelData |
   }
   return {
     id: typeof o.id === 'string' && o.id ? o.id : fallbackId,
-    name: typeof o.name === 'string' && o.name ? o.name : 'Без названия',
+    name: typeof o.name === 'string' && o.name ? o.name : 'Untitled',
     author: typeof o.author === 'string' ? o.author : undefined,
     rows,
     ballSpeed: Math.min(Math.max(speed, 0.5), 2.5),

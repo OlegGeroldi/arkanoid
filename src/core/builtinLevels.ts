@@ -4,7 +4,7 @@ import { normalizeLevel } from './level';
 /** Built-in campaign. Rows are 12 characters wide; see BRICK_KINDS for codes. */
 const RAW: Omit<LevelData, 'id'>[] = [
   {
-    name: 'Пробуждение',
+    name: 'Awakening',
     rows: [
       '............',
       '............',
@@ -16,7 +16,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 0.9,
   },
   {
-    name: 'Ступени',
+    name: 'Steps',
     rows: [
       '............',
       'nn..........',
@@ -29,7 +29,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ],
   },
   {
-    name: 'Улей',
+    name: 'Hive',
     rows: [
       '............',
       '.tt..tt..tt.',
@@ -43,7 +43,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 1.05,
   },
   {
-    name: 'Крепость',
+    name: 'Fortress',
     rows: [
       '............',
       'xxnnnnnnnnxx',
@@ -57,7 +57,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 1.05,
   },
   {
-    name: 'Фейерверк',
+    name: 'Fireworks',
     rows: [
       '............',
       '..e......e..',
@@ -71,7 +71,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 1.1,
   },
   {
-    name: 'Сад камней',
+    name: 'Rock Garden',
     rows: [
       '............',
       'rr.rr..rr.rr',
@@ -85,7 +85,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 1.1,
   },
   {
-    name: 'Сокровищница',
+    name: 'Treasury',
     rows: [
       '............',
       'ssssssssssss',
@@ -99,7 +99,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 1.15,
   },
   {
-    name: 'Череп',
+    name: 'Skull',
     rows: [
       '..ssssssss..',
       '.snnnnnnnns.',
@@ -114,7 +114,7 @@ const RAW: Omit<LevelData, 'id'>[] = [
     ballSpeed: 1.2,
   },
   {
-    name: 'Лабиринт',
+    name: 'Labyrinth',
     rows: [
       'xnnnnnnnnnnx',
       'x.x.x.x.x..x',
