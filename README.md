@@ -6,6 +6,10 @@ everyone's arena plus a running ticker, and each round is a short arkanoid
 level everyone plays at once, each on their own device. There is one mode,
 one match at a time, per server.
 
+**Status:** stages 1–2 of 7 are done: lobby, accounts, solo bot, 10 arenas
+with two bosses, and the TV. The shop, questions and alliances described in
+"How to play" arrive in later stages.
+
 ## Running it
 
 ```bash
