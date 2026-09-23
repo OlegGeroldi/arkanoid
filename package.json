@@ -1,9 +1,9 @@
 {
-  "name": "team-quiz-arkanoid",
+  "name": "arcoquiz",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Team-vs-team party game: an Arkanoid pilot per team plays a level each round while the rest of the team plays a Jeopardy-style board and spends credits on a live shop",
+  "description": "A server-directed TV quiz show for up to 10 players, built on an Arkanoid engine: a shared TV screen shows a live grid of everyone's arena while each round plays out simultaneously on players' own devices.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

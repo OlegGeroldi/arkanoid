@@ -1,95 +1,98 @@
-# Командный квиз
+# ARCOQUIZ
 
-Party-игра для нескольких игроков: каждый раунд все играют мини-арканоид на
-время одновременно, каждый за себя, а заодно отвечают на карточки «Своей
-игры» и тратят заработанные кредиты в магазине бустов — прямо во время
-раунда, пока идёт гонка. В любой момент можно заключить или разорвать союз с
-другим игроком (до 3 человек) — баффы долетают только до союзника, дебаффы —
-только до чужого.
+A server-directed TV quiz show built on an Arkanoid engine. Up to 10 players
+join from their phones, a shared screen (the TV) shows a live grid of
+everyone's arena plus a running ticker, and each round is a short arkanoid
+level everyone plays at once, each on their own device. There is one mode,
+one match at a time, per server.
 
-## Запуск
+## Running it
 
 ```bash
 npm install
 npm run dev
 ```
 
-Играть вместе по локальной сети (собирает игру и поднимает сервер комнат):
+Play together over the local network (builds the game and starts the room
+server):
 
 ```bash
 npm run lan
 ```
 
-Сервер напечатает адрес вида `http://192.168.х.х:8080` — его открывают все
-устройства в этой Wi-Fi сети, ничего устанавливать не нужно. Если порт занят:
+The server prints an address like `http://192.168.x.x:8080` — open it from
+any device on the same Wi-Fi network, nothing to install. If the port is
+taken:
 
 ```bash
 PORT=8081 npm run lan
 ```
 
-или освободите его: `lsof -ti tcp:8080 | xargs kill`.
+or free it: `lsof -ti tcp:8080 | xargs kill`.
 
-## Роли
+## How to play
 
-Каждое устройство при входе выбирает роль:
+1. Sign in as yourself (or create a player: name, avatar, 4-digit PIN) and press «Ready».
+2. Every round is a short arkanoid level: mouse or ←/→, Space to launch. Clear it first for a bonus.
+3. Points decide your place. Coins (from bricks) are spent in the shop between rounds.
+4. Alliances: team up to three, give it a name — buffs go to allies only, debuffs to everyone else.
+5. 10 rounds in three acts, two bosses: at the end of act 2 and in the finale. Most points wins.
 
-- **Ведущий** — записывает игроков (по одному, без деления на команды), жмёт
-  «Начать матч», в реальном времени открывает карточки «Своей игры» и
-  начисляет за них очки.
-- **Пилот/игрок** — свой собственный арканоид: управление мышью/`A`·`D`/
-  `←`·`→`, `Пробел` — запуск и выстрел, `Shift` — суперудар, `Q`/`E` —
-  скиллы, плюс магазин бустов, доска «Своей игры» и панель союзов на том же
-  экране.
-- **Трансляция** — общий экран (доска объявлений + общий счёт) для
-  проектора/телевизора, без органов управления.
+If you are the only human when a match starts, a bot named «Bot» (🤖) fills
+the other seat so a solo player still gets a full show.
 
-## Как устроен раунд
+## Roles
 
-1. Ведущий жмёт «Начать матч» — все игроки получают одинаковый сид и общий
-   трек.
-2. Каждый раунд все играют **одновременно**, каждый на своём уровне — свой
-   кубик и своя анимация броска у каждого.
-3. Пока идёт гонка, можно отвечать на карточки «Своей игры» и тратить
-   накопленные кредиты в магазине: доп. жизнь, барьер, суперудар, время на
-   часах хода, попутный ветер по кубику — себе или союзнику, либо диверсия —
-   дебафф не-союзнику.
-4. Кто зачистил уровень первым — получает +1 очко и право выбрать следующий
-   вопрос; кто не успел — только −1 очко и один шаг по треку вместо полного
-   броска кубика.
-5. Финальная клетка — мега-босс. Кто его добивает, тот первым заканчивает
-   гонку, но чемпионом матча объявляется тот, у кого больше очков в сумме
-   (гонка + верные ответы) — не обязательно тот же самый игрок.
+Every device picks a role when it opens the game (or skips the picker with a
+URL query):
 
-## Союзы
+- **`?role=tv`** — the shared screen: the lobby roster, a live grid of every
+  player's arena during a round, the header (act, round, boss warning,
+  countdown), and a ticker of recent events along the bottom. No controls.
+- **`?role=player`** — sign in, ready up, and play your own arena on your own
+  device (mouse/keyboard) when a round starts.
 
-В любой момент, прямо во время матча, можно заключить союз с другим игроком
-(до 3 человек в одном союзе) или выйти из своего — кнопки прямо на игровом
-экране. Баффы из магазина долетают только до союзника, дебаффы — только до
-не-союзника; выход из союза, оставляющий в нём одного человека, распускает
-союз целиком.
+With no `role` in the URL, the game shows a picker («I'm playing» / «This is
+the TV») instead.
 
-## Контент «Своей игры»
+## Accounts
 
-Карточки — в `server/data/jeopardy.json` (сетка категорий × номиналов,
-редактируется вручную или через `GET`/`PUT /api/jeopardy`). Каждая карточка —
-`judged` (ведущий сам решает очки) или `ranked` («сто к одному»:
-заранее заданный список ответов с очками за каждый). Отдельного экрана-редактора
-пока нет — правки вносятся в JSON-файл напрямую.
+Accounts are stored server-side in `server/data/players.json` (gitignored —
+local to each install, not shipped in the repo). Registering needs a name
+(1–16 characters, unique case-insensitively), an avatar, and a 4-digit PIN;
+signing back in just needs the PIN. The PIN itself is never stored — only a
+scrypt hash and a random salt per account — and a successful sign-in hands
+the browser a session token so reopening the game later resumes the same
+account without retyping the PIN.
 
-## Устройство кода
+## Code layout
 
 ```
-src/core/     симуляция арканоида (Arena, физика, кирпичи, бонусы, скиллы,
-              суперудары, генератор уровней) + правила командного режима
-              (teamRace.ts, shop.ts, jeopardy.ts)
-src/render/   canvas-рендер, частицы, живой миррор чужого поля
-src/game/     сцены: экраны пилота/команды/ведущего, ввод, фиксированный шаг
-src/audio/    синтез звуков и музыкальный плеер
-src/ui/       меню, DOM-хелперы, стили
-src/net/      WebSocket-клиент и типизированный протокол
-server/       LAN-сервер комнат (Node, без фреймворка) — судья матча и
-              CRUD для контента «Своей игры»
+src/core/     pure arkanoid simulation (Arena, physics, bricks, power-ups,
+              bosses, the procedural level generator) — no DOM/network
+src/render/   canvas drawing: the live arena, and a snapshot mirror that
+              interpolates another player's arena from periodic snapshots
+src/game/show/   the client-side show store (replays server state/events),
+                  the arena runner, and the bot runner (plays the bot's
+                  arena on whichever client the server names bot host)
+src/game/player/  the player's device: login, lobby, waiting view, arena
+src/game/tv/      the TV screen: lobby, live arena grid, ticker, standings
+src/ui/       start screen (role picker), the manual, DOM helpers, styles
+src/net/      WebSocket client and the show's wire protocol
+              (src/net/showProtocol.ts)
+server/show/  the show engine: phases, timers, the round schedule, scoring,
+              and accounts — the server directs the show; clients simulate
+              their own arena and report the result back
+server/       the LAN server (Node, no framework) that serves the built
+              client and runs the WebSocket relay for the show engine
 ```
 
-Подробности архитектуры и принцип «сервер — судья, а не симуляция» — в
-`CLAUDE.md`.
+## Tests
+
+```bash
+npm test
+```
+
+Runs the server-side show engine's test suite (`node --test server/**/*.test.js`).
+`npm run typecheck` (also run by `npm run build`) is the other correctness
+gate — run both after any non-trivial change.
