@@ -75,6 +75,8 @@ export type ShowUp =
   | { k: 'login'; id: string; pin: string }
   | { k: 'resume'; token: string }
   | { k: 'ready'; ready: boolean }
+  /** Unbind this device from its account (and un-ready it) before switching player. */
+  | { k: 'logout' }
   | { k: 'result'; result: ArenaResult; for?: string }
   | { k: 'snapshot'; snap: ArenaSnapshot; for?: string }
   | { k: 'restart' };

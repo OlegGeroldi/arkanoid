@@ -28,6 +28,17 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
   const tvPeers = () => [...peers].filter(([, p]) => p.role === 'tv').map(([id]) => id);
   const playerPeer = (accountId) => [...peers].find(([, p]) => p.accountId === accountId)?.[0] ?? null;
   const inMatch = () => [...players.values()].filter((p) => p.inMatch);
+  /** Seats in use: players who are connected or still in the match. */
+  const seatsTaken = () => [...players.values()].filter((p) => p.inMatch || p.isBot || playerPeer(p.id)).length;
+
+  /** In the lobby, a player who is neither connected nor in a match holds no
+   *  seat: drop the record (a later login or resume re-adds it). */
+  function prune() {
+    if (phase !== 'lobby') return;
+    for (const p of [...players.values()]) {
+      if (!p.isBot && !p.inMatch && !playerPeer(p.id)) players.delete(p.id);
+    }
+  }
 
   function botHost() {
     const tv = tvPeers()[0];
@@ -80,8 +91,9 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
     // A second device logging into the same account takes it over.
     for (const [pid, p] of peers) if (p.accountId === acc.id && pid !== peerId) p.accountId = null;
     peers.get(peerId).accountId = acc.id;
+    prune();
     if (!players.has(acc.id)) {
-      if (players.size >= MAX_PLAYERS) {
+      if (seatsTaken() >= MAX_PLAYERS) {
         peers.get(peerId).accountId = null;
         out(peerId, { k: 'auth', ok: false, error: 'All 10 seats are taken.' });
         return;
@@ -165,6 +177,17 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
         p.ready = Boolean(msg.ready);
         event('ready', { playerId: p.id });
         maybeStart();
+        pushState();
+        break;
+      }
+      case 'logout': {
+        const p = peer.accountId && players.get(peer.accountId);
+        peer.accountId = null;
+        if (!p) break;
+        p.ready = false;
+        event('left', { playerId: p.id });
+        prune();
+        if (phase === 'lobby') maybeStart();
         pushState();
         break;
       }
@@ -255,6 +278,7 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
         phase = 'lobby'; deadline = null; roundIdx = -1; schedule = [];
         players.delete(BOT.id);
         for (const p of players.values()) { p.ready = false; p.inMatch = false; p.result = null; }
+        prune();
         pushState();
         break;
     }
@@ -276,6 +300,7 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
       const accId = peers.get(peerId)?.accountId;
       peers.delete(peerId);
       if (accId) event('left', { playerId: accId });
+      prune();
       if (phase === 'lobby') maybeStart();
       pushState();
     },

@@ -83,7 +83,8 @@ test('resume with a token re-binds the account to a new peer', async () => {
   await login(eng, 'p1', 'u1');
   const auth = eng.drain().find((o) => o.msg.k === 'auth' && o.msg.ok);
   eng.disconnect('p1');
-  assert.equal(eng.state().players.find((p) => p.id === 'u1').connected, false);
+  // In the lobby a disconnected player's seat is freed; resume takes it back.
+  assert.equal(eng.state().players.find((p) => p.id === 'u1'), undefined);
   eng.connect('p9');
   await eng.handle('p9', { k: 'resume', token: auth.msg.token });
   assert.equal(eng.state().players.find((p) => p.id === 'u1').connected, true);
@@ -254,6 +255,87 @@ test('reported time cannot exceed the round clock', async () => {
   const { eng } = await startedDuo();
   await eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 9999 }) });
   assert.equal(eng.state().players.find((p) => p.id === 'u1').score, 100 + DUR.arena + 50);
+});
+
+// ---------------------------------------------------------- seats & logout --
+
+function manyAccounts(n) {
+  const many = Array.from({ length: n }, (_, i) => ({ id: `x${i}`, name: `N${i}`, avatar: '🦊', stats: {} }));
+  return { ...fakeAccounts(), list: () => many, verify: (id) => many.find((a) => a.id === id) ?? null };
+}
+
+function setupMany(n) {
+  let t = 1_000_000;
+  const eng = createShowEngine({ now: () => t, accounts: manyAccounts(n), seed: () => 3 });
+  return { eng, advance: (s) => { t += s * 1000; eng.tick(); } };
+}
+
+test('logout unbinds the account and un-readies it, cancelling the countdown', async () => {
+  const { eng, advance } = setup();
+  await login(eng, 'p1', 'u1');
+  await login(eng, 'p2', 'u2');
+  await eng.handle('p1', { k: 'ready', ready: true });
+  assert.ok(eng.state().countdownEnd);
+  await eng.handle('p1', { k: 'logout' });
+  const st = eng.state();
+  assert.equal(st.countdownEnd, null);
+  const u1 = st.players.find((p) => p.id === 'u1');
+  assert.ok(!u1 || (!u1.ready && !u1.connected));
+  // The peer is no longer bound: its ready is ignored.
+  await eng.handle('p1', { k: 'ready', ready: true });
+  assert.equal(eng.state().countdownEnd, null);
+  advance(DUR.countdown + 0.1);
+  assert.equal(eng.state().phase, 'lobby');
+});
+
+test('a logged-out lobby seat is freed', async () => {
+  const { eng } = setup();
+  await login(eng, 'p1', 'u1');
+  await eng.handle('p1', { k: 'logout' });
+  assert.equal(eng.state().players.length, 0);
+});
+
+test('disconnected lobby players free their seats for newcomers', async () => {
+  const { eng } = setupMany(11);
+  for (let i = 0; i < 10; i++) await login(eng, `p${i}`, `x${i}`);
+  for (let i = 0; i < 10; i++) eng.disconnect(`p${i}`);
+  eng.drain();
+  await login(eng, 'p10', 'x10');
+  const out = eng.drain();
+  assert.ok(out.some((o) => o.to === 'p10' && o.msg.k === 'auth' && o.msg.ok === true));
+  assert.deepEqual(eng.state().players.map((p) => p.id), ['x10']);
+});
+
+test('the seat cap counts connected players plus players in the match', async () => {
+  const { eng, advance } = setupMany(12);
+  for (let i = 0; i < 10; i++) await login(eng, `p${i}`, `x${i}`);
+  await eng.handle('p0', { k: 'ready', ready: true });
+  advance(DUR.countdown + 0.1); // x0 + bot in the match
+  assert.equal(eng.state().phase, 'intro');
+  for (let i = 1; i < 10; i++) eng.disconnect(`p${i}`); // spectators leave mid-match
+  eng.drain();
+  await login(eng, 'p10', 'x10');
+  assert.ok(eng.drain().some((o) => o.to === 'p10' && o.msg.k === 'auth' && o.msg.ok === true));
+});
+
+test('a disconnected player still in the match keeps their seat', async () => {
+  const { eng } = setupMany(11);
+  for (let i = 0; i < 10; i++) await login(eng, `p${i}`, `x${i}`);
+  for (let i = 0; i < 10; i++) await eng.handle(`p${i}`, { k: 'ready', ready: true });
+  assert.equal(eng.state().phase, 'intro');
+  eng.disconnect('p3');
+  eng.drain();
+  await login(eng, 'p10', 'x10');
+  assert.ok(eng.drain().some((o) => o.to === 'p10' && o.msg.k === 'auth' && o.msg.ok === false));
+});
+
+test('restart drops players who left during the match', async () => {
+  const s = await startedDuo();
+  s.eng.disconnect('p2');
+  for (let i = 0; i < 40 && s.eng.state().phase !== 'over'; i++) s.advance(DUR.bossArena + DUR.grace + 1);
+  assert.equal(s.eng.state().phase, 'over');
+  await s.eng.handle('p1', { k: 'restart' });
+  assert.deepEqual(s.eng.state().players.map((p) => p.id), ['u1']);
 });
 
 // ------------------------------------------------------------ TV snapshots --

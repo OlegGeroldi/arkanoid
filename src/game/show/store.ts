@@ -57,7 +57,8 @@ export class ShowStore {
 
   send(msg: ShowUp): void { net.sendShow(msg); }
 
-  logout(): void { safeSet(TOKEN_KEY, null); this.me = null; this.emit(); }
+  /** Tell the server first, so the seat is freed and a countdown can't start on our behalf. */
+  logout(): void { this.send({ k: 'logout' }); safeSet(TOKEN_KEY, null); this.me = null; this.emit(); }
 
   private receive(msg: ShowDown): void {
     switch (msg.k) {
@@ -69,7 +70,13 @@ export class ShowStore {
       case 'state':
         this.state = msg.show;
         this.skew = Date.now() - msg.show.now;
-        if (this.me) this.me = msg.show.players.find((p) => p.id === this.me!.id) ?? this.me;
+        if (this.me) {
+          const mine = msg.show.players.find((p) => p.id === this.me!.id);
+          // Dropped from the lobby roster (our seat was freed): back to login.
+          // The token stays: a resume on reconnect takes the seat back.
+          if (mine) this.me = mine;
+          else if (msg.show.phase === 'lobby') this.me = null;
+        }
         break;
       case 'event':
         this.events = [...this.events.slice(-29), msg.ev];
