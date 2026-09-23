@@ -30,6 +30,7 @@
 .tick.cleared { color: var(--green); } .tick.died, .tick.timeout { color: var(--red); } .tick.matchOver { color: var(--amber); }
 @keyframes tick-in { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
 .tv-lobby, .tv-standings { max-width: 1200px; margin: 4vh auto; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+.tv-lobby .manual { font-size: 22px; text-align: left; max-width: 900px; }
 .tv-lobby h1, .tv-standings h1 { font-size: clamp(44px, 7vw, 96px); margin: 0; letter-spacing: 6px; }
 .tv-url { font-size: 30px; color: var(--amber); margin: 0; }
 .tv-roster { display: grid; grid-template-columns: repeat(5, 170px); gap: 14px; }

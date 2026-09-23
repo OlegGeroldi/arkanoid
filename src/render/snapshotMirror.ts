@@ -108,16 +108,5 @@ export function drawSnapshotMirror(
     ctx.fill();
   }
   ctx.shadowBlur = 0;
-
-  const ms = Math.round(mirror.age * 1000);
-  const rate = Math.round(1 / Math.max(0.02, mirror.gap));
-  ctx.textAlign = 'right';
-  ctx.font = `600 11px ${FONT}`;
-  ctx.fillStyle = ms > 400 ? '#ff4d6d' : 'rgba(255,255,255,0.35)';
-  ctx.fillText(`frame: ${ms} ms · ${rate} fps`, ARENA_W - 12, ARENA_H - 12);
-  if (ms > 500) {
-    ctx.fillStyle = '#ff4d6d';
-    ctx.fillText('player window not focused?', ARENA_W - 12, ARENA_H - 26);
-  }
   ctx.restore();
 }
