@@ -90,7 +90,7 @@ export const newId = (prefix: string): string =>
 export function makeProfile(name: string, admin = false): Profile {
   return {
     id: newId('p'),
-    name: name.trim().slice(0, 24) || 'Игрок',
+    name: name.trim().slice(0, 24) || 'Player',
     admin,
     totalXp: 0,
     bestScore: 0,
@@ -192,7 +192,7 @@ export function loadStore(): Store {
   const raw = read<Partial<Store> | null>(STORE_KEY, null);
 
   if (raw && Array.isArray(raw.players) && raw.players.length) {
-    const players = raw.players.map((p, i) => sanitizeProfile(p, `Игрок ${i + 1}`)).slice(0, MAX_PROFILES);
+    const players = raw.players.map((p, i) => sanitizeProfile(p, `Player ${i + 1}`)).slice(0, MAX_PROFILES);
     const activeId = players.some((p) => p.id === raw.activeId) ? raw.activeId! : players[0].id;
     const overrides: Record<string, LevelData> = {};
     for (const [key, value] of Object.entries(raw.campaignOverrides ?? {})) {
@@ -203,7 +203,7 @@ export function loadStore(): Store {
   }
 
   const legacy = read<Partial<Profile> | null>(LEGACY_PROFILE_KEY, null);
-  const first = sanitizeProfile({ ...(legacy ?? {}), admin: true }, legacy?.name ?? 'Админ');
+  const first = sanitizeProfile({ ...(legacy ?? {}), admin: true }, legacy?.name ?? 'Admin');
   const store: Store = { version: 2, players: [first], activeId: first.id, campaignOverrides: {} };
   saveStore(store);
   return store;

@@ -19,7 +19,11 @@ export type SfxName =
   | 'cleared'
   | 'dead'
   | 'goal'
-  | 'ui';
+  | 'ui'
+  | 'diceTick'
+  | 'diceLand'
+  | 'trackStep'
+  | 'trackReveal';
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -211,6 +215,20 @@ export class Sfx {
         break;
       case 'ui':
         this.tone(720, 0.05, { type: 'triangle', gain: 0.14 });
+        break;
+      case 'diceTick':
+        this.hit(0.03, { freq: 2400, q: 2, gain: 0.16 });
+        break;
+      case 'diceLand':
+        this.tone(392, 0.1, { type: 'square', gain: 0.24 });
+        this.tone(523, 0.14, { type: 'square', gain: 0.2, delay: 0.05 });
+        break;
+      case 'trackStep':
+        this.tone(260, 0.05, { type: 'triangle', gain: 0.16, sweepTo: 320 });
+        break;
+      case 'trackReveal':
+        this.tone(660, 0.09, { type: 'square', gain: 0.2 });
+        this.tone(990, 0.12, { type: 'square', gain: 0.16, delay: 0.07 });
         break;
     }
   }

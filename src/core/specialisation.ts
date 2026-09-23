@@ -25,10 +25,10 @@ export interface SpecDef {
 export const SPECS: Record<SpecId, SpecDef> = {
   gunner: {
     id: 'gunner',
-    name: 'Артиллерист',
+    name: 'Gunner',
     icon: '↑',
     color: '#ff7a3d',
-    desc: 'Штатный лазер, двойной урон выстрелов и щедрая энергия для суперов',
+    desc: 'Built-in laser, double shot damage and generous super energy',
     apply: (s) => {
       s.laserAlways = true;
       s.energyMul *= 1.35;
@@ -38,10 +38,10 @@ export const SPECS: Record<SpecId, SpecDef> = {
   },
   elementalist: {
     id: 'elementalist',
-    name: 'Элементалист',
+    name: 'Elementalist',
     icon: '✷',
     color: '#c46bff',
-    desc: 'Элементальные шары живут вдвое дольше, бьют больнее и выпадают чаще',
+    desc: 'Elemental balls last twice as long, hit harder and drop more often',
     apply: (s) => {
       s.dropChanceMul *= 1.4;
       s.ballDamage += 1;
@@ -51,10 +51,10 @@ export const SPECS: Record<SpecId, SpecDef> = {
   },
   warden: {
     id: 'warden',
-    name: 'Страж',
+    name: 'Warden',
     icon: '▭',
     color: '#4de2ff',
-    desc: '+2 жизни и +2 барьера сразу, ракетка шире, мяч послушнее',
+    desc: '+2 lives and +2 shields right away, wider paddle, gentler ball',
     apply: (s) => {
       s.bonusLives += 2;
       s.bonusShields += 2;

@@ -1,14 +1,15 @@
 {
-  "name": "neonoid",
+  "name": "arcoquiz",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Arkanoid-like brick breaker with XP progression, super strikes, level editor and local PvP",
+  "description": "A server-directed TV quiz show for up to 10 players, built on an Arkanoid engine: a shared TV screen shows a live grid of everyone's arena while each round plays out simultaneously on players' own devices.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "node --test server/**/*.test.js",
     "serve": "node server/index.js",
     "lan": "npm run build && node server/index.js"
   },

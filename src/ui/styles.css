@@ -1,8 +1,14 @@
 :root {
-  --bg: #05070f;
-  --panel: rgba(12, 18, 38, 0.92);
-  --line: rgba(77, 226, 255, 0.28);
-  --cyan: #4de2ff;
+  /* Palette carried over from the standalone party quiz this content and
+     format was ported from (`quizz/public/css/styles.css`'s 42-school navy/
+     teal) — the accent (`--cyan`) is that quiz's `--accent: #17b6bd` teal,
+     kept under its original name here since every existing rule already
+     references `var(--cyan)`. */
+  --bg: #071a20;
+  --bg-gradient: linear-gradient(135deg, #071a20 0%, #0d2b30 50%, #0a2427 100%);
+  --panel: rgba(10, 30, 34, 0.92);
+  --line: rgba(23, 182, 189, 0.32);
+  --cyan: #17b6bd;
   --violet: #b06bff;
   --amber: #ffd24d;
   --pink: #ff5fa2;
@@ -18,7 +24,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  background: var(--bg-gradient);
   color: var(--text);
   font-family: var(--font);
   overflow: hidden;
@@ -58,9 +64,9 @@ h1.logo {
 
 .tagline { margin: 0 0 22px; color: var(--muted); letter-spacing: 3px; font-size: 12px; text-transform: uppercase; }
 
-h2 { margin: 0 0 14px; font-size: 22px; font-weight: 800; letter-spacing: 1px; }
-h3 { margin: 0 0 8px; font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
-p.hint { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 8px 0; }
+h2 { margin: 0 0 14px; font-size: 25px; font-weight: 800; letter-spacing: 1px; }
+h3 { margin: 0 0 8px; font-size: 17px; font-weight: 700; letter-spacing: 0.5px; }
+p.hint { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 8px 0; }
 
 /* ---------------------------------------------------------------- panels -- */
 
@@ -110,7 +116,12 @@ p.hint { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 8px 0;
 }
 .btn.ghost { background: transparent; border-color: rgba(255, 255, 255, 0.16); }
 .btn.danger { border-color: rgba(255, 77, 109, 0.5); color: #ffbcc8; }
+/* An already-picked card: unmistakably done, not just dimmed — cursor stays
+   default since clicking it is a no-op. */
+.btn.used { background: rgba(61, 220, 132, 0.1); border-color: rgba(61, 220, 132, 0.4); color: var(--green); cursor: default; }
+.btn.used:hover { background: rgba(61, 220, 132, 0.1); transform: none; }
 .btn.small { padding: 7px 12px; font-size: 12px; border-radius: 9px; }
+.btn.large { font-size: 19px; padding: 18px 28px; border-radius: 14px; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ----------------------------------------------------------------- cards -- */
@@ -125,10 +136,34 @@ p.hint { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 8px 0;
 }
 .card:hover { border-color: var(--cyan); background: rgba(77, 226, 255, 0.08); transform: translateY(-2px); }
 .card.selected { border-color: var(--amber); background: rgba(255, 210, 77, 0.12); }
-.card .title { font-weight: 800; font-size: 15px; display: flex; gap: 8px; align-items: center; }
-.card .desc { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.45; }
+.card .title { font-weight: 800; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+.card .desc { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.45; }
 .card .icon { font-size: 20px; }
 .card.locked { opacity: 0.45; cursor: not-allowed; }
+
+/* The announcement board is the one place round-state, the open question and
+   recent events live — everything around it (shop, mirror, menu button) must
+   stay put while only this box's own content changes, so it gets a fixed
+   footprint with its own internal scroll instead of growing/shrinking the
+   whole page. Visually set apart from the plain `.card` boxes around it since
+   it's the screen's actual focal point now, not just another panel. */
+.card.announce {
+  cursor: default;
+  border-color: var(--violet);
+  background: linear-gradient(180deg, rgba(176, 107, 255, 0.14), rgba(255, 255, 255, 0.03));
+  box-shadow: 0 0 0 1px rgba(176, 107, 255, 0.25), 0 10px 30px rgba(0, 0, 0, 0.35);
+  height: 480px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.card.announce:hover {
+  transform: none;
+  border-color: var(--violet);
+  background: linear-gradient(180deg, rgba(176, 107, 255, 0.14), rgba(255, 255, 255, 0.03));
+}
+.card.announce > .title { color: var(--violet); font-size: 17px; flex: 0 0 auto; }
+.card.announce > .board-scroll { flex: 1 1 auto; overflow-y: auto; margin-top: 6px; padding-right: 6px; }
 
 .pill {
   display: inline-flex;
@@ -136,7 +171,7 @@ p.hint { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 8px 0;
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   background: rgba(77, 226, 255, 0.12);
   border: 1px solid rgba(77, 226, 255, 0.25);
@@ -161,7 +196,7 @@ kbd {
   font-weight: 700;
 }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], select, textarea {
   font: inherit;
   color: var(--text);
   background: rgba(255, 255, 255, 0.06);
@@ -170,7 +205,8 @@ input[type="text"], input[type="number"], select {
   padding: 9px 12px;
   outline: none;
 }
-input:focus, select:focus { border-color: var(--cyan); }
+textarea { resize: vertical; }
+input:focus, select:focus, textarea:focus { border-color: var(--cyan); }
 label.field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
 
 /* ---------------------------------------------------------------- editor -- */
@@ -416,7 +452,93 @@ p.story {
   background: color-mix(in srgb, var(--cell) 12%, transparent);
   animation: cellreveal 0.45s ease;
 }
+/* A freshly-created `.race-effect` always replays its entrance animation —
+   fine for a one-off reveal, but `teamQuizDevice.ts`'s announcement board
+   rebuilds this element on every re-render (including periodic countdown
+   ticks while racing/spectating), so a caller that's already shown this
+   exact card once opts out with this modifier instead of popping forever. */
+.race-effect.no-anim { animation: none; }
 .race-effect .glyph { font-size: 34px; line-height: 1; }
 .race-effect h4 { margin: 0 0 4px; font-size: 18px; color: var(--cell); }
 .race-effect .what { font-size: 15px; font-weight: 700; }
 .race-effect .say { margin: 8px 0 0; font-size: 13px; font-style: italic; color: var(--muted); }
+
+/* -------------------------------------------------- jeopardy card reveal -- */
+/* Ported from the standalone party quiz's card-flip interface — same rotateY
+   turn, restyled onto this app's own panel/line/text tokens above rather than
+   a second color system. `.card-flip` toggles `.is-flipped` a frame after
+   mount (see `cardFlip()` in `ui/dom.ts`) so the transition actually plays. */
+
+.card-stage {
+  perspective: 1600px;
+  width: 100%;
+  max-width: 680px;
+  height: min(46vh, 340px);
+  margin: 0 auto;
+}
+.card-flip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.4, 0.2, 0.2, 1);
+}
+.card-flip.is-flipped { transform: rotateY(180deg); }
+.card-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border-radius: 18px;
+  padding: 26px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+}
+.card-back {
+  background: var(--panel);
+  border: 2px dashed var(--line);
+}
+.card-back-emoji { font-size: 56px; }
+.card-front {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--line);
+  transform: rotateY(180deg);
+  overflow-y: auto;
+}
+.card-category {
+  --category-color: var(--amber);
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: var(--category-color);
+  color: #12181c;
+  font-weight: 800;
+  font-size: 14px;
+}
+.card-front h4 { margin: 10px 0 0; font-size: clamp(22px, 3.4vw, 28px); font-weight: 800; }
+.card-front p { margin: 8px 0 0; color: var(--text); font-size: clamp(16px, 2.2vw, 19px); line-height: 1.5; }
+.card-type-badge { position: absolute; top: 12px; right: 14px; font-size: 22px; opacity: 0.85; }
+
+/* Answer options shown on a live reveal card — chips, not a bulleted list, so
+   the card reads as a game piece rather than a form. */
+.answer-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
+.answer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 15px;
+  font-weight: 600;
+}
+.answer-chip.correct { border-color: var(--green); color: var(--green); background: rgba(61, 220, 132, 0.12); }
+.answer-chip.wrong { border-color: var(--red); color: var(--red); background: rgba(255, 77, 109, 0.12); }
+/* Marks which chip(s) were actually picked, layered on top of correct/wrong's
+   own color — a ring, not a colour swap, so "picked" and "right or wrong"
+   read as two separate facts instead of merging into one. */
+.answer-chip.picked { box-shadow: 0 0 0 2px currentColor inset; }

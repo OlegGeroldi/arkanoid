@@ -24,10 +24,10 @@ export interface RouteDef {
 export const ROUTES: Record<RouteId, RouteDef> = {
   foundry: {
     id: 'foundry',
-    name: 'Литейная',
+    name: 'Foundry',
     icon: '⛓',
     color: '#ff7a3d',
-    desc: 'Сталь, неразрушимые и взрывные блоки. Медленно, тяжело, но очки идут потоком.',
+    desc: 'Steel, unbreakable and explosive bricks. Slow, tough, but points pour in.',
     palette: ['s', 's', 'x', 'e', 't'],
     density: 1.12,
     ballSpeed: 0.94,
@@ -36,10 +36,10 @@ export const ROUTES: Record<RouteId, RouteDef> = {
   },
   garden: {
     id: 'garden',
-    name: 'Оранжерея',
+    name: 'Garden',
     icon: '❉',
     color: '#3ddc84',
-    desc: 'Регенераторы, золото и подарки. Уровни живучие, зато опыт капает щедро.',
+    desc: 'Regenerators, gold and gifts. Levels are tough, but XP flows generously.',
     palette: ['r', 'g', 'p', 'n'],
     density: 0.95,
     ballSpeed: 1,
@@ -48,10 +48,10 @@ export const ROUTES: Record<RouteId, RouteDef> = {
   },
   wastes: {
     id: 'wastes',
-    name: 'Пустошь',
+    name: 'Wastes',
     icon: '☢',
     color: '#b06bff',
-    desc: 'Хаотичные поля и разогнанный мяч. Опаснее всего — и бонусы сыплются чаще всех.',
+    desc: 'Chaotic fields and an overclocked ball. Most dangerous — and bonuses drop most often.',
     palette: ['n', 't', 'e', 'g', 'x'],
     density: 1.05,
     ballSpeed: 1.18,

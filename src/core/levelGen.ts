@@ -500,34 +500,34 @@ function hangProps(rng: Rng, grid: string[][], index: number, total: number): Le
 }
 
 const CHAOS_NAMES = [
-  'Аномалия',
-  'Разлом',
-  'Шторм',
-  'Бездна',
-  'Коллапс',
-  'Сингулярность',
-  'Пепел',
-  'Ноль',
-  'Нейросбой',
-  'Предел',
+  'Anomaly',
+  'Rift',
+  'Storm',
+  'Abyss',
+  'Collapse',
+  'Singularity',
+  'Ashes',
+  'Null',
+  'Glitch',
+  'Limit',
 ];
 
 const STAGE_NAMES = [
-  'Периметр',
-  'Каскад',
-  'Улей',
-  'Бастион',
-  'Спираль',
-  'Кристалл',
-  'Реактор',
-  'Мозаика',
-  'Батарея',
-  'Клетка',
-  'Купол',
-  'Решётка',
-  'Призма',
-  'Ядро',
-  'Барьер',
+  'Perimeter',
+  'Cascade',
+  'Hive',
+  'Bastion',
+  'Spiral',
+  'Crystal',
+  'Reactor',
+  'Mosaic',
+  'Battery',
+  'Cell',
+  'Dome',
+  'Lattice',
+  'Prism',
+  'Core',
+  'Barrier',
 ];
 
 /** Builds one campaign level. Deterministic: the same index always produces the
@@ -595,7 +595,7 @@ export function generateLevel(
   openRegeneratorPockets(grid, recipe.rows);
 
   const rows = grid.map((row) => row.join(''));
-  // A picture names the level after itself: "Сердце" says more than "Каскад 3".
+  // A picture names the level after itself: "Heart" says more than "Cascade 3".
   const baseName = glyph
     ? glyph.name
     : recipe.chaos

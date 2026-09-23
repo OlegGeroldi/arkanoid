@@ -38,7 +38,7 @@ export function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds <= 0) return '—';
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return m > 0 ? `${m}:${s.toFixed(1).padStart(4, '0')}` : `${s.toFixed(1)} с`;
+  return m > 0 ? `${m}:${s.toFixed(1).padStart(4, '0')}` : `${s.toFixed(1)} s`;
 }
 
 /** Folds one cleared level into the stats table. */

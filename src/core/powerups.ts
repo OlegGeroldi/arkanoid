@@ -49,28 +49,28 @@ export interface PowerupDef {
 export const POWERUPS = {} as Record<PowerupId, PowerupDef>;
 
 const BASE_POWERUPS: Partial<Record<PowerupId, PowerupDef>> = {
-  expand: { id: 'expand', letter: 'E', name: 'Расширение', desc: 'Ракетка шире', color: '#4de2ff', weight: 12, duration: 18 },
-  shrink: { id: 'shrink', letter: 'S', name: 'Сжатие', desc: 'Ракетка уже', color: '#ff4d6d', weight: 5, bad: true, duration: 12 },
-  multiball: { id: 'multiball', letter: 'D', name: 'Мультимяч', desc: '+2 мяча', color: '#ffd24d', weight: 10 },
-  laser: { id: 'laser', letter: 'L', name: 'Лазер', desc: 'Стрельба по кирпичам', color: '#ff7a3d', weight: 9, duration: 16 },
-  catch: { id: 'catch', letter: 'C', name: 'Захват', desc: 'Ракетка ловит мяч', color: '#3ddc84', weight: 7, duration: 20 },
-  slow: { id: 'slow', letter: 'W', name: 'Замедление', desc: 'Мячи медленнее', color: '#7c6cff', weight: 7, duration: 12 },
-  speed: { id: 'speed', letter: 'F', name: 'Ускорение', desc: 'Мячи быстрее', color: '#ff4d6d', weight: 4, bad: true, duration: 10 },
-  life: { id: 'life', letter: 'P', name: 'Жизнь', desc: '+1 жизнь', color: '#ff5fa2', weight: 4 },
-  shield: { id: 'shield', letter: 'B', name: 'Барьер', desc: 'Ловит мяч внизу 1 раз', color: '#4de2ff', weight: 6 },
-  pierce: { id: 'pierce', letter: 'X', name: 'Пробой', desc: 'Мяч прошивает кирпичи', color: '#ff7a3d', weight: 5, duration: 9 },
-  xp: { id: 'xp', letter: 'O', name: 'Опыт', desc: 'Сразу порция опыта', color: '#ffd24d', weight: 9 },
-  energy: { id: 'energy', letter: 'U', name: 'Энергия', desc: '+35 к заряду супера', color: '#b06bff', weight: 8 },
+  expand: { id: 'expand', letter: 'E', name: 'Expand', desc: 'Wider paddle', color: '#4de2ff', weight: 12, duration: 18 },
+  shrink: { id: 'shrink', letter: 'S', name: 'Shrink', desc: 'Narrower paddle', color: '#ff4d6d', weight: 5, bad: true, duration: 12 },
+  multiball: { id: 'multiball', letter: 'D', name: 'Multiball', desc: '+2 balls', color: '#ffd24d', weight: 10 },
+  laser: { id: 'laser', letter: 'L', name: 'Laser', desc: 'Fires at bricks', color: '#ff7a3d', weight: 9, duration: 16 },
+  catch: { id: 'catch', letter: 'C', name: 'Catch', desc: 'Paddle catches ball', color: '#3ddc84', weight: 7, duration: 20 },
+  slow: { id: 'slow', letter: 'W', name: 'Slow', desc: 'Balls move slower', color: '#7c6cff', weight: 7, duration: 12 },
+  speed: { id: 'speed', letter: 'F', name: 'Speed', desc: 'Balls move faster', color: '#ff4d6d', weight: 4, bad: true, duration: 10 },
+  life: { id: 'life', letter: 'P', name: 'Life', desc: '+1 life', color: '#ff5fa2', weight: 4 },
+  shield: { id: 'shield', letter: 'B', name: 'Shield', desc: 'Catches the ball below, once', color: '#4de2ff', weight: 6 },
+  pierce: { id: 'pierce', letter: 'X', name: 'Pierce', desc: 'Ball plows through bricks', color: '#ff7a3d', weight: 5, duration: 9 },
+  xp: { id: 'xp', letter: 'O', name: 'XP', desc: 'Instant XP boost', color: '#ffd24d', weight: 9 },
+  energy: { id: 'energy', letter: 'U', name: 'Energy', desc: '+35 super charge', color: '#b06bff', weight: 8 },
   // Race only: does nothing to the field, it goes into your stock of cards to
   // throw at other people's turns. Power there is earned at the paddle here.
-  card: { id: 'card', letter: '★', name: 'Карта', desc: 'Карта в запас — бросите её в чужой ход', color: '#ffd24d', weight: 14, raceOnly: true },
+  card: { id: 'card', letter: '★', name: 'Card', desc: 'Banks a card — play it on someone else\'s turn', color: '#ffd24d', weight: 14, raceOnly: true },
 
   // Elemental balls: these recolour every ball in play and change how it hits.
-  ballLava: { id: 'ballLava', letter: 'M', name: 'Лава-болл', desc: 'Огненный пробивающий мяч', color: '#ff6a2b', weight: 6, ball: 'lava' },
-  ballAqua: { id: 'ballAqua', letter: 'A', name: 'Аква-болл', desc: 'Медленный мяч с волной', color: '#3ad9ff', weight: 6, ball: 'aqua' },
-  ballLaser: { id: 'ballLaser', letter: 'Z', name: 'Лазер-болл', desc: 'Мяч стреляет лучами', color: '#7dff6a', weight: 5, ball: 'laser' },
-  ballPlasma: { id: 'ballPlasma', letter: 'Q', name: 'Плазма-болл', desc: 'Цепная молния', color: '#c46bff', weight: 5, ball: 'plasma' },
-  ballVoid: { id: 'ballVoid', letter: 'G', name: 'Войд-болл', desc: 'Тяжёлый мяч с притяжением', color: '#8a7bff', weight: 4, ball: 'void' },
+  ballLava: { id: 'ballLava', letter: 'M', name: 'Lava Ball', desc: 'Fiery, piercing ball', color: '#ff6a2b', weight: 6, ball: 'lava' },
+  ballAqua: { id: 'ballAqua', letter: 'A', name: 'Aqua Ball', desc: 'Slow ball with a wave', color: '#3ad9ff', weight: 6, ball: 'aqua' },
+  ballLaser: { id: 'ballLaser', letter: 'Z', name: 'Laser Ball', desc: 'Ball fires beams', color: '#7dff6a', weight: 5, ball: 'laser' },
+  ballPlasma: { id: 'ballPlasma', letter: 'Q', name: 'Plasma Ball', desc: 'Chain lightning', color: '#c46bff', weight: 5, ball: 'plasma' },
+  ballVoid: { id: 'ballVoid', letter: 'G', name: 'Void Ball', desc: 'Heavy ball with pull', color: '#8a7bff', weight: 4, ball: 'void' },
 };
 
 Object.assign(POWERUPS, BASE_POWERUPS);

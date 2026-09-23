@@ -42,8 +42,8 @@ export interface Glyph {
  *  mirrored around it. */
 export const GLYPHS: Glyph[] = [
   {
-    name: 'Сердце',
-    idea: 'сердцевина регенерирует, внутри заряд',
+    name: 'Heart',
+    idea: 'the core regenerates, charge inside',
     mirror: true,
     skin: { body: 'n', core: 'r', charge: 'e' },
     art: [
@@ -59,8 +59,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Бомба',
-    idea: 'два фитиля сходятся в корпус',
+    name: 'Bomb',
+    idea: 'two fuses meet at the body',
     mirror: true,
     skin: { body: 't', core: 'e', charge: 'e' },
     art: [
@@ -76,8 +76,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Череп',
-    idea: 'глазницы не бьются, челюсть взрывается',
+    name: 'Skull',
+    idea: 'the eye sockets do not break, the jaw explodes',
     mirror: true,
     skin: { body: 'n', core: 'x', charge: 'e' },
     art: [
@@ -92,8 +92,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Захватчик',
-    idea: 'классический пришелец с начинкой',
+    name: 'Invader',
+    idea: 'a classic alien with a filling',
     mirror: true,
     skin: { body: 't', core: 'g', charge: 'e' },
     art: [
@@ -108,8 +108,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Звезда',
-    idea: 'ядро под слоем брони',
+    name: 'Star',
+    idea: 'a core under a layer of armor',
     mirror: true,
     skin: { body: 's', core: 'g', charge: 'e' },
     art: [
@@ -124,8 +124,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Смайл',
-    idea: 'глаза регенерируют, улыбка взрывная',
+    name: 'Smiley',
+    idea: 'the eyes regenerate, the smile is explosive',
     mirror: true,
     skin: { body: 'n', core: 'r', charge: 'e' },
     art: [
@@ -140,8 +140,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Стрела',
-    idea: 'наконечник взрывается, древко держит',
+    name: 'Arrow',
+    idea: 'the head explodes, the shaft holds',
     mirror: true,
     skin: { body: 't', core: 's', charge: 'e' },
     art: [
@@ -156,8 +156,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Призрак',
-    idea: 'сквозь него не пройти, глаза золотые',
+    name: 'Ghost',
+    idea: 'you cannot pass through it, its eyes are gold',
     mirror: true,
     skin: { body: 'n', core: 'g', charge: 'e' },
     art: [
@@ -172,8 +172,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Реактор',
-    idea: 'кольцо брони вокруг живого ядра',
+    name: 'Reactor',
+    idea: 'a ring of armor around a living core',
     mirror: true,
     skin: { body: 's', core: 'r', charge: 'e' },
     art: [
@@ -189,8 +189,8 @@ export const GLYPHS: Glyph[] = [
     ],
   },
   {
-    name: 'Мина',
-    idea: 'шипы наружу, заряд внутри',
+    name: 'Mine',
+    idea: 'spikes outward, charge inside',
     mirror: true,
     skin: { body: 's', core: 'e', charge: 'e' },
     art: [
@@ -224,128 +224,128 @@ export interface Rune {
 
 export const RUNES: Rune[] = [
   {
-    name: 'Феху',
-    meaning: 'скот, богатство',
+    name: 'Fehu',
+    meaning: 'cattle, wealth',
     skin: { body: 'n', core: 'g', charge: 'e' },
     art: ['#...#', '#..#.', '#.#.#', '##.#.', '#.#..', '#....', '#....'],
   },
   {
-    name: 'Уруз',
-    meaning: 'тур, дикая сила',
+    name: 'Uruz',
+    meaning: 'aurochs, wild strength',
     skin: { body: 't', core: 's', charge: 'e' },
     art: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '#...#'],
   },
   {
-    name: 'Турисаз',
-    meaning: 'шип, великан',
+    name: 'Thurisaz',
+    meaning: 'thorn, giant',
     skin: { body: 's', core: 'e', charge: 'e' },
     art: ['#....', '##...', '#@#..', '#@#..', '##...', '#....', '#....'],
   },
   {
-    name: 'Ансуз',
-    meaning: 'бог, слово',
+    name: 'Ansuz',
+    meaning: 'god, word',
     skin: { body: 'n', core: 'g', charge: 'e' },
     art: ['#..#.', '#.#..', '##...', '#..#.', '#.#..', '##...', '#....'],
   },
   {
-    name: 'Райдо',
-    meaning: 'дорога, путь',
+    name: 'Raido',
+    meaning: 'road, journey',
     skin: { body: 't', core: 'n', charge: 'e' },
     art: ['###..', '#..#.', '#..#.', '###..', '#.#..', '#..#.', '#...#'],
   },
   {
-    name: 'Кеназ',
-    meaning: 'факел',
+    name: 'Kenaz',
+    meaning: 'torch',
     skin: { body: 'n', core: 'e', charge: 'e' },
     art: ['...#.', '..#..', '.#...', '@....', '.#...', '..#..', '...#.'],
   },
   {
-    name: 'Гебо',
-    meaning: 'дар',
+    name: 'Gebo',
+    meaning: 'gift',
     skin: { body: 'g', core: 'g', charge: 'e' },
     art: ['#...#', '.#.#.', '..@..', '.#.#.', '#...#', '.....', '.....'],
   },
   {
-    name: 'Вуньо',
-    meaning: 'радость',
+    name: 'Wunjo',
+    meaning: 'joy',
     skin: { body: 'n', core: 'p', charge: 'e' },
     art: ['#.##.', '#@..#', '#.##.', '#....', '#....', '#....', '#....'],
   },
   {
-    name: 'Хагалаз',
-    meaning: 'град, разрушение',
+    name: 'Hagalaz',
+    meaning: 'hail, destruction',
     skin: { body: 't', core: 'e', charge: 'e' },
     art: ['#...#', '#...#', '#@@@#', '#...#', '#...#', '#...#', '#...#'],
   },
   {
-    name: 'Наутиз',
-    meaning: 'нужда',
+    name: 'Nauthiz',
+    meaning: 'need',
     skin: { body: 'n', core: 'r', charge: 'e' },
     art: ['..#..', '..#..', '.@#..', '@@#..', '..#..', '..#..', '..#..'],
   },
   {
-    name: 'Иса',
-    meaning: 'лёд',
+    name: 'Isa',
+    meaning: 'ice',
     skin: { body: 's', core: 's', charge: 'e' },
     art: ['..#..', '..#..', '..@..', '..#..', '..@..', '..#..', '..#..'],
   },
   {
-    name: 'Йера',
-    meaning: 'год, урожай',
+    name: 'Jera',
+    meaning: 'year, harvest',
     skin: { body: 'n', core: 'g', charge: 'e' },
     art: ['.##..', '#..#.', '.#.@.', '..#..', '.@.#.', '#..#.', '.##..'],
   },
   {
-    name: 'Соулу',
-    meaning: 'солнце',
+    name: 'Sowilo',
+    meaning: 'sun',
     skin: { body: 'g', core: 'e', charge: 'e' },
     art: ['..##.', '.##..', '.#...', '..@..', '...#.', '..##.', '.##..'],
   },
   {
-    name: 'Тейваз',
-    meaning: 'победа',
+    name: 'Tiwaz',
+    meaning: 'victory',
     skin: { body: 't', core: 'g', charge: 'e' },
     art: ['..#..', '.###.', '##@##', '..#..', '..#..', '..#..', '..#..'],
   },
   {
-    name: 'Беркана',
-    meaning: 'берёза, рост',
+    name: 'Berkana',
+    meaning: 'birch, growth',
     skin: { body: 'n', core: 'r', charge: 'e' },
     art: ['##...', '#@#..', '#@#..', '##...', '#@#..', '#@#..', '##...'],
   },
   {
-    name: 'Манназ',
-    meaning: 'человек',
+    name: 'Mannaz',
+    meaning: 'man',
     skin: { body: 't', core: 'p', charge: 'e' },
     art: ['#...#', '##.##', '#@#@#', '#...#', '#...#', '#...#', '#...#'],
   },
   {
-    name: 'Лагуз',
-    meaning: 'вода',
+    name: 'Laguz',
+    meaning: 'water',
     skin: { body: 'n', core: 's', charge: 'e' },
     art: ['#.##.', '#@#..', '#....', '#....', '#....', '#....', '#....'],
   },
   {
-    name: 'Ингваз',
-    meaning: 'семя',
+    name: 'Ingwaz',
+    meaning: 'seed',
     skin: { body: 'n', core: 'r', charge: 'e' },
     art: ['..#..', '.#.#.', '#.@.#', '#...#', '#.@.#', '.#.#.', '..#..'],
   },
   {
-    name: 'Отала',
-    meaning: 'наследие',
+    name: 'Othala',
+    meaning: 'heritage',
     skin: { body: 's', core: 'g', charge: 'e' },
     art: ['..#..', '.#.#.', '#.@.#', '.#.#.', '..#..', '.#.#.', '#...#'],
   },
   {
-    name: 'Дагаз',
-    meaning: 'рассвет',
+    name: 'Dagaz',
+    meaning: 'dawn',
     skin: { body: 'n', core: 'e', charge: 'e' },
     art: ['#...#', '##.##', '#.@.#', '#.#.#', '#.@.#', '##.##', '#...#'],
   },
   {
-    name: 'Альгиз',
-    meaning: 'защита',
+    name: 'Algiz',
+    meaning: 'protection',
     skin: { body: 's', core: 'x', charge: 'e' },
     art: ['#.@.#', '.#@#.', '..#..', '..#..', '..#..', '..#..', '..#..'],
   },
@@ -358,7 +358,7 @@ export function runeGlyph(a: Rune, b: Rune): Glyph {
   const art = Array.from({ length: 7 }, (_, r) => `${a.art[r]}..${b.art[r]}`);
   return {
     name: `${a.name} · ${b.name}`,
-    idea: `${a.meaning} и ${b.meaning}`,
+    idea: `${a.meaning} and ${b.meaning}`,
     skin: a.skin,
     mirror: false,
     thin: true,
@@ -398,16 +398,16 @@ const FONT: Record<string, string[]> = {
 
 /** Short enough to fit, rude enough to be worth reading. */
 export const WORDS: { text: string; idea: string; skin: GlyphSkin }[] = [
-  { text: 'DOH', idea: 'имя того, кто ждёт на сотом', skin: { body: 's', core: 'e', charge: 'e' } },
-  { text: 'NEO', idea: 'вывеска станции', skin: { body: 't', core: 'g', charge: 'e' } },
-  { text: 'SOS', idea: 'кто-то звал на помощь', skin: { body: 'n', core: 'r', charge: 'e' } },
-  { text: '404', idea: 'сектор не найден', skin: { body: 't', core: 'x', charge: 'e' } },
-  { text: 'XP!', idea: 'обещание отдела кадров', skin: { body: 'g', core: 'g', charge: 'e' } },
-  { text: 'GG', idea: 'кто-то уже сдался', skin: { body: 'n', core: 'e', charge: 'e' } },
-  { text: 'TNT', idea: 'маркировка склада', skin: { body: 't', core: 'e', charge: 'e' } },
-  { text: 'OK', idea: 'подпись неразборчива', skin: { body: 'n', core: 'g', charge: 'e' } },
-  { text: 'ZZZ', idea: 'ночная смена', skin: { body: 'n', core: 'r', charge: 'e' } },
-  { text: 'HP', idea: 'то, чего вечно не хватает', skin: { body: 'n', core: 'r', charge: 'e' } },
+  { text: 'DOH', idea: 'the name of the one waiting at the hundredth', skin: { body: 's', core: 'e', charge: 'e' } },
+  { text: 'NEO', idea: 'a station sign', skin: { body: 't', core: 'g', charge: 'e' } },
+  { text: 'SOS', idea: 'someone called for help', skin: { body: 'n', core: 'r', charge: 'e' } },
+  { text: '404', idea: 'sector not found', skin: { body: 't', core: 'x', charge: 'e' } },
+  { text: 'XP!', idea: 'a promise from HR', skin: { body: 'g', core: 'g', charge: 'e' } },
+  { text: 'GG', idea: 'someone already gave up', skin: { body: 'n', core: 'e', charge: 'e' } },
+  { text: 'TNT', idea: 'a warehouse marking', skin: { body: 't', core: 'e', charge: 'e' } },
+  { text: 'OK', idea: 'a signature you cannot read', skin: { body: 'n', core: 'g', charge: 'e' } },
+  { text: 'ZZZ', idea: 'the night shift', skin: { body: 'n', core: 'r', charge: 'e' } },
+  { text: 'HP', idea: 'the thing you never have enough of', skin: { body: 'n', core: 'r', charge: 'e' } },
 ];
 
 /** Renders a word as glyph art. Letters the font does not know are skipped
