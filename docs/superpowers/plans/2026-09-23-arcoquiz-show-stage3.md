@@ -972,10 +972,11 @@ Also:
     - `number`: a finite number.
 
     Then call `submitAnswer(who, msg.value, msg.wager)`.
-- **`state()`:** add `pick` and `reveal`, and `question: question && phase !== 'reveal' ? { ...publicQuestion(question, bank), points: questionBase(question), wagerMax: 0 } : (question ? { ...publicQuestion(question, bank), points: questionBase(question), wagerMax: 0 } : null)`. The question stays visible during the reveal. The answer is only in `reveal`.
+- **`state()`:** add `pick`, `reveal` and `question: question ? { ...publicQuestion(question, bank), points: questionBase(question), wagerMax: 0 } : null`. The question stays visible during the reveal, and the answer appears only inside `reveal`.
 - **`publicPlayer(p)`:** add `answered: answers.has(p.id)` and `wagerMax: wagerMaxOf(p)`.
 - **`server/index.js`:** `import { loadBank } from './show/questions.js'`, then `const bank = loadBank(join(ROOT, 'server', 'content', 'questions'));` and pass `bank` to `createShowEngine`.
 - **The existing `setup()`** passes `bank: testBank`.
+- **Existing tests that expect `'roundEnd'` right after all arena results** now see `'pick'`, or `'question'` if nobody cleared: `round ends when everyone reported…` and `silent players time out…`. Change those assertions to `assert.ok(['pick', 'question'].includes(st.phase))`. Keep every scoring assertion as it is.
 
 - [ ] **Step 4: Run the tests.** Run `npm test`. Everything passes, including the 10-round test through `advanceUntil`.
 
