@@ -4,7 +4,8 @@ import { buildSchedule } from './schedule.js';
 import { scoreArena } from './scoring.js';
 
 /** The show's referee and director: phases, timers, roster, schedule, score.
- *  It never touches sockets; index.js drains `outbox` onto them. */
+ *  It never touches sockets; index.js drains `outbox` onto them. Internally
+ *  `out('tv', …)` targets the TV screens; drain() resolves it to their ids. */
 export function createShowEngine({ now, accounts, seed = () => (Math.random() * 2 ** 32) >>> 0 }) {
   /** peerId -> { role, accountId|null } */
   const peers = new Map();
@@ -246,7 +247,7 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
         break;
       case 'snapshot':
         if (phase === 'arena' && who?.inMatch && (msg.for === undefined || fromBotHost)) {
-          out('*', { k: 'snapshot', playerId: who.id, snap: msg.snap });
+          out('tv', { k: 'snapshot', playerId: who.id, snap: msg.snap });
         }
         break;
       case 'restart':
@@ -281,6 +282,13 @@ export function createShowEngine({ now, accounts, seed = () => (Math.random() * 
     handle,
     tick,
     state,
-    drain() { const o = outbox; outbox = []; return o; },
+    /** Pending messages. `to` is '*' (everyone), a peer id, or — for TV-only
+     *  traffic — an array of the TV peer ids connected right now. */
+    drain() {
+      const o = outbox;
+      outbox = [];
+      const tvs = tvPeers();
+      return o.map((e) => (e.to === 'tv' ? { to: tvs, msg: e.msg } : e));
+    },
   };
 }

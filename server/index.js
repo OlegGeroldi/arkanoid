@@ -64,11 +64,13 @@ const show = createShowEngine({ now: Date.now, accounts });
 /** peerId -> ws */
 const sockets = new Map();
 
+/** Sends the engine's pending messages. `to` is '*' (everyone), one peer id,
+ *  or an array of peer ids (TV-only traffic). Each payload is stringified once. */
 function flush() {
   for (const { to, msg } of show.drain()) {
-    const payload = { type: 'show', msg };
-    if (to === '*') for (const ws of sockets.values()) send(ws, payload);
-    else if (sockets.has(to)) send(sockets.get(to), payload);
+    const text = JSON.stringify({ type: 'show', msg });
+    const targets = to === '*' ? sockets.values() : Array.isArray(to) ? to.map((id) => sockets.get(id)) : [sockets.get(to)];
+    for (const ws of targets) if (ws) sendRaw(ws, text);
   }
 }
 
@@ -88,7 +90,7 @@ const server = createServer((req, res) => {
 
 // -------------------------------------------------------------- websockets --
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
 /** roomName -> Set<ws> */
 const rooms = new Map();
 
@@ -113,9 +115,10 @@ function onListenError(err) {
 server.on('error', onListenError);
 wss.on('error', onListenError);
 
-const send = (ws, msg) => {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+const sendRaw = (ws, text) => {
+  if (ws.readyState === ws.OPEN) ws.send(text);
 };
+const send = (ws, msg) => sendRaw(ws, JSON.stringify(msg));
 
 function broadcast(room, msg, except) {
   for (const peer of rooms.get(room) ?? []) {
@@ -136,6 +139,10 @@ wss.on('connection', (ws) => {
 
   send(ws, { type: 'welcome', id: ws.peerId, features: ['show'] });
 
+  // A socket error (e.g. a message over maxPayload) closes that socket; without
+  // a listener it would be an unhandled 'error' event and take the server down.
+  ws.on('error', (err) => console.error('socket error from', ws.peerId, err.message));
+
   ws.on('message', (raw) => {
     let msg;
     try {
@@ -143,27 +150,33 @@ wss.on('connection', (ws) => {
     } catch {
       return;
     }
+    // `null`, numbers, strings and arrays parse fine but are not messages.
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
 
-    switch (msg.type) {
-      case 'join': {
-        const room = String(msg.room ?? 'lobby').slice(0, 32);
-        rooms.get(ws.room)?.delete(ws);
-        ws.room = room;
-        if (!rooms.has(room)) rooms.set(room, new Set());
-        rooms.get(room).add(ws);
-        send(ws, { type: 'joined', room });
-        break;
+    try {
+      switch (msg.type) {
+        case 'join': {
+          const room = String(msg.room ?? 'lobby').slice(0, 32);
+          rooms.get(ws.room)?.delete(ws);
+          ws.room = room;
+          if (!rooms.has(room)) rooms.set(room, new Set());
+          rooms.get(room).add(ws);
+          send(ws, { type: 'joined', room });
+          break;
+        }
+
+        case 'show':
+          void show.handle(ws.peerId, msg.msg).then(flush, (err) => {
+            console.error('show.handle failed:', err);
+            flush();
+          }).catch((err) => console.error('show flush failed:', err));
+          break;
+
+        default:
+          break;
       }
-
-      case 'show':
-        void show.handle(ws.peerId, msg.msg).then(flush, (err) => {
-          console.error('show.handle failed:', err);
-          flush();
-        }).catch((err) => console.error('show flush failed:', err));
-        break;
-
-      default:
-        break;
+    } catch (err) {
+      console.error('bad message from', ws.peerId, err);
     }
   });
 

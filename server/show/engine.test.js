@@ -255,3 +255,25 @@ test('reported time cannot exceed the round clock', async () => {
   await eng.handle('p1', { k: 'result', result: res({ cleared: true, timeLeft: 9999 }) });
   assert.equal(eng.state().players.find((p) => p.id === 'u1').score, 100 + DUR.arena + 50);
 });
+
+// ------------------------------------------------------------ TV snapshots --
+
+test('arena snapshots go to TV peers only', async () => {
+  const s = await startedDuo();
+  s.eng.connect('tv1');
+  await s.eng.handle('tv1', { k: 'hello', role: 'tv' });
+  s.eng.drain();
+  await s.eng.handle('p1', { k: 'snapshot', snap: { t: 1 } });
+  const snaps = s.eng.drain().filter((o) => o.msg.k === 'snapshot');
+  assert.equal(snaps.length, 1);
+  assert.deepEqual(snaps[0].to, ['tv1']);
+  assert.equal(snaps[0].msg.playerId, 'u1');
+});
+
+test('with no TV connected, snapshots go nowhere', async () => {
+  const s = await startedDuo();
+  s.eng.drain();
+  await s.eng.handle('p1', { k: 'snapshot', snap: { t: 1 } });
+  const snaps = s.eng.drain().filter((o) => o.msg.k === 'snapshot');
+  assert.ok(snaps.every((o) => Array.isArray(o.to) && o.to.length === 0));
+});
